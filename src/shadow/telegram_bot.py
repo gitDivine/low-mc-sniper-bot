@@ -98,8 +98,6 @@ class TelegramNotifier:
         )
         await self.send_message(msg, reply_markup=self.get_inline_keyboard())
 
-import html
-
     async def send_hourly_heartbeat(self, pending_count: int, resolved_count: int, report_text: str) -> None:
         """Sends hourly heartbeat message to confirm bot is active."""
         safe_report = html.escape(report_text[:800])
