@@ -1,0 +1,81 @@
+================================================================================
+ [REPORT] LOW-MC TOKEN SNIPER BOT (v2) — GATE CALIBRATION & BACKTEST REPORT
+================================================================================
+Total Historical Tokens Analyzed : 65
+Tokens Passing All 14 Gates      : 0 (0.0%)
+Tokens Rejected by Pipeline      : 65 (100.0%)
+--------------------------------------------------------------------------------
+ [CROSS-TAB] SECTION 9 CROSS-TABULATION: PIPELINE DECISION vs. ACTUAL OUTCOME
+--------------------------------------------------------------------------------
+outcome_label                Flat / mediocre  Rug / dead  Total
+passed_all_gates                                               
+Failed >= 1 Gate (REJECTED)                9          56     65
+Total                                      9          56     65
+--------------------------------------------------------------------------------
+ [REJECTIONS] SHORT-CIRCUIT REJECTION BREAKDOWN (Where Did Candidates Fail?)
+--------------------------------------------------------------------------------
+                   Failed Gate (Short-Circuit Reason)  Tokens Rejected  % of Rejected
+                       Gate 10 (Unique Buyers 0 < 20)                6            9.2
+                  Gate 9 (Liq/Mcap Ratio 0.25 < 0.25)                2            3.1
+     Gate 11a (Mcap $11,225 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $4,405 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,932 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,685 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,957 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $7,774,131 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,380 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $13,184 outside $30,000-$250,000)                1            1.5
+    Gate 11a (Mcap $447,916 outside $30,000-$250,000)                1            1.5
+    Gate 11a (Mcap $303,877 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $2,499,295 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $5,649 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,483 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,629 outside $30,000-$250,000)                1            1.5
+                         Gate 11b (Liq $26 < $10,000)                1            1.5
+      Gate 11a (Mcap $1,850 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,509 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $6,072 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $4,991 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $10,650 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,036 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $7,894 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $3,926 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,178 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $15,395 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $11,524 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,876 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,484 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,564 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,090 outside $30,000-$250,000)                1            1.5
+Gate 11a (Mcap $179,975,262 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $1,814,949 outside $30,000-$250,000)                1            1.5
+    Gate 11a (Mcap $290,635 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $6,777 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $1,815,151 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $3,079,736 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,373 outside $30,000-$250,000)                1            1.5
+    Gate 11a (Mcap $633,635 outside $30,000-$250,000)                1            1.5
+    Gate 11a (Mcap $258,576 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,831 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $3,644,470 outside $30,000-$250,000)                1            1.5
+Gate 11a (Mcap $352,230,859 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,341 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $3,691 outside $30,000-$250,000)                1            1.5
+Gate 11a (Mcap $246,062,992 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $16,600 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $14,369 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $1,320,886 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,460 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,520 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $7,690,233 outside $30,000-$250,000)                1            1.5
+        Gate 11a (Mcap $114 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $3,089,799 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $1,527 outside $30,000-$250,000)                1            1.5
+      Gate 11a (Mcap $2,037 outside $30,000-$250,000)                1            1.5
+  Gate 11a (Mcap $1,124,600 outside $30,000-$250,000)                1            1.5
+     Gate 11a (Mcap $26,542 outside $30,000-$250,000)                1            1.5
+================================================================================
+ [VERDICT] CALIBRATION VERDICT & GUIDANCE:
+  [WARN] ZERO TOKENS PASSED: Your cutoff thresholds are currently TOO STRICT.
+     Recommendation: Loosen Gate 6 (Holder Count), Gate 11a (Mcap Band), or Gate 14 (Age Window).
+================================================================================
