@@ -4,6 +4,7 @@ Handles startup alerts, hourly heartbeats, interactive buttons,
 and on-demand CSV data file delivery directly inside Telegram.
 """
 import asyncio
+import html
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -97,14 +98,17 @@ class TelegramNotifier:
         )
         await self.send_message(msg, reply_markup=self.get_inline_keyboard())
 
+import html
+
     async def send_hourly_heartbeat(self, pending_count: int, resolved_count: int, report_text: str) -> None:
         """Sends hourly heartbeat message to confirm bot is active."""
+        safe_report = html.escape(report_text[:800])
         msg = (
             f"💓 <b>Shadow Runner Heartbeat</b>\n\n"
             f"<b>Status:</b> ONLINE\n"
             f"<b>Pending T0 Tokens:</b> {pending_count}\n"
             f"<b>Resolved Outcomes:</b> {resolved_count}\n\n"
-            f"<pre>{report_text[:800]}</pre>"
+            f"<pre>{safe_report}</pre>"
         )
         await self.send_message(msg, reply_markup=self.get_inline_keyboard())
 
@@ -134,9 +138,20 @@ class TelegramNotifier:
                     else:
                         await self.send_message("⚠️ No data files generated yet. Keep the runner active!")
 
-            elif cb_data in ("get_report", "get_status"):
+            elif cb_data == "get_report":
                 report = runner.generate_report()
-                await self.send_message(f"<pre>{report}</pre>", reply_markup=self.get_inline_keyboard())
+                safe_report = html.escape(report)
+                await self.send_message(f"📈 <b>Live Calibration Report</b>\n\n<pre>{safe_report}</pre>", reply_markup=self.get_inline_keyboard())
+
+            elif cb_data == "get_status":
+                status_text = (
+                    f"🔄 <b>Shadow Runner Status</b>\n\n"
+                    f"<b>Network:</b> {runner.network.upper()}\n"
+                    f"<b>Pending Queue:</b> {len(runner.pending_tokens)} tokens\n"
+                    f"<b>Resolved Outcomes:</b> {len(runner.resolved_tokens)} tokens\n"
+                    f"<b>Seen Pools:</b> {len(runner.seen_pools)} pools"
+                )
+                await self.send_message(status_text, reply_markup=self.get_inline_keyboard())
             return
 
         # Handle Text Commands (/getdata, /status, /report, /help)
