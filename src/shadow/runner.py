@@ -25,6 +25,14 @@ SOLANA_BURN_ADDRESSES = {
 }
 
 
+RTL_CHARACTERS = {"\u202e", "\u202d", "\u202b", "\u202a", "\u200f", "\u200e", "\u2066", "\u2067", "\u2068", "\u2069"}
+
+
+def has_rtl_control_chars(text: str) -> bool:
+    """Detects Unicode Right-to-Left (RTL) override control characters used in scam tokens."""
+    return any(char in RTL_CHARACTERS for char in text)
+
+
 class ShadowRunner:
     """Orchestrates live discovery, real-time T0 gate snapshotting, and outcome resolution."""
 
@@ -105,10 +113,10 @@ class ShadowRunner:
         except Exception as e:
             logger.error(f"Error saving resolved_tokens: {e}")
 
-    # --- Discovery & Real-Time T0 Snapshotting ---
+    # --- Discovery & Snapshot Logic ---
 
     async def discover_and_snapshot(self, pages: int = 2) -> int:
-        """Polls GeckoTerminal for newly launched pools and performs real-time T0 gate snapshotting."""
+        """Polls GeckoTerminal new pools endpoint and captures T0 snapshots for fresh pools."""
         logger.info(f"Polling new pools for '{self.network}' (pages 1-{pages})...")
         new_count = 0
 
@@ -138,7 +146,26 @@ class ShadowRunner:
                 volume_dict = attributes.get("volume_usd", {})
                 vol_15m = float(volume_dict.get("m5", 0.0) or volume_dict.get("h1", 0.0) or 0.0)
 
-                logger.info(f"Discovered fresh pool: {symbol} ({pool_address}) | Price: ${price_usd:.6f} | Liq: ${liquidity_usd:,.0f}")
+                # --- Hygiene Filter 1: Unicode RTL Impersonation Scam Check ---
+                has_rtl_scam = has_rtl_control_chars(name) or has_rtl_control_chars(symbol)
+                if has_rtl_scam:
+                    logger.warning(f"RTL Scam Character detected in symbol/name ({symbol}) for pool {pool_address}. Flagging.")
+
+                # --- Hygiene Filter 2: Dust starting price / Mega-pool check ---
+                # Ignore uninitialized dust pools (<$1k liq or <$10k mcap) and fake mega-pools (>$5M mcap)
+                if mcap_usd < 10000.0 or liquidity_usd < 1000.0:
+                    logger.info(f"Skipping pre-fill dust pool: {symbol} (MCap: ${mcap_usd:,.0f}, Liq: ${liquidity_usd:,.0f})")
+                    self.seen_pools.add(pool_address)
+                    self._save_seen_pools()
+                    continue
+
+                if mcap_usd > 5000000.0:
+                    logger.info(f"Skipping established mega-pool: {symbol} (MCap: ${mcap_usd:,.0f})")
+                    self.seen_pools.add(pool_address)
+                    self._save_seen_pools()
+                    continue
+
+                logger.info(f"Discovered fresh pool: {symbol} ({pool_address}) | Price: ${price_usd:.6f} | Liq: ${liquidity_usd:,.0f} | MCap: ${mcap_usd:,.0f}")
 
                 # Perform Real-Time T0 Gate Checks via On-Chain RPC
                 snapshot = await self._capture_t0_snapshot(
@@ -149,6 +176,7 @@ class ShadowRunner:
                     liquidity_usd=liquidity_usd,
                     mcap_usd=mcap_usd,
                     vol_15m=vol_15m,
+                    has_rtl_scam=has_rtl_scam,
                 )
 
                 self.seen_pools.add(pool_address)
@@ -177,6 +205,7 @@ class ShadowRunner:
         liquidity_usd: float,
         mcap_usd: float,
         vol_15m: float,
+        has_rtl_scam: bool = False,
     ) -> dict[str, Any]:
         """Runs immediate RPC calls for Gates 1, 4, 5, 9, 11a, 11b at launch moment (T0)."""
         t0_top10_pct = 15.0
@@ -256,6 +285,7 @@ class ShadowRunner:
             "t0_lp_locked_days": t0_lp_locked_days,
             "t0_is_token_2022": is_token_2022,
             "t0_has_malicious_extensions": has_malicious_ext,
+            "t0_has_rtl_scam": has_rtl_scam,
             "liq_mcap_ratio": liq_mcap_ratio,
             "status": "PENDING",
         }
@@ -302,16 +332,22 @@ class ShadowRunner:
 
             roi = round(tfinal_price / t0_price, 4) if t0_price > 0 else 0.0
 
+            # Calculate evaluation window label dynamically
+            if eval_delay_seconds >= 3600:
+                win_str = f"{round(eval_delay_seconds / 3600, 1)}h"
+            else:
+                win_str = f"{round(eval_delay_seconds / 60)}m"
+
             # Outcome Classification
             if roi >= 2.0:
                 label = "Winner"
-                reason = f"24h ROI was {roi:.2f}x"
+                reason = f"{win_str} ROI was {roi:.2f}x"
             elif roi <= 0.2:
                 label = "Rug / dead"
-                reason = f"24h ROI plummeted to {roi:.2f}x"
+                reason = f"{win_str} ROI plummeted to {roi:.2f}x"
             else:
                 label = "Flat / mediocre"
-                reason = f"Survived but ROI only {roi:.2f}x"
+                reason = f"Survived but {win_str} ROI only {roi:.2f}x"
 
             snapshot.update({
                 "tfinal_timestamp": now,
