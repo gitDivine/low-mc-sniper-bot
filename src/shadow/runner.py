@@ -151,9 +151,10 @@ class ShadowRunner:
                 if has_rtl_scam:
                     logger.warning(f"RTL Scam Character detected in symbol/name ({symbol}) for pool {pool_address}. Flagging.")
 
-                # --- Hygiene Filter 2: Strict Gate 11 Spec Target Scope ($30k-$100k MCap & >=$10k Liq) ---
-                # Skip pre-fill dust pools (<$30k MCap / <$10k Liq) and established/mega pools (>$100k MCap)
-                if mcap_usd < 30000.0 or mcap_usd > 100000.0 or liquidity_usd < 10000.0:
+                # --- Hygiene Filter 2: Wide-Scope Collection Bounds ($5k-$500k MCap & >=$1k Liq) ---
+                # Exclude uninitialized 0-block dust pools (<$5k MCap / <$1k Liq) and mega pools (>$500k MCap)
+                # Raw records are preserved across the $5k-$500k spectrum for analysis-time gate testing
+                if mcap_usd < 5000.0 or mcap_usd > 500000.0 or liquidity_usd < 1000.0:
                     logger.debug(f"Skipping out-of-scope pool: {symbol} (MCap: ${mcap_usd:,.0f}, Liq: ${liquidity_usd:,.0f})")
                     self.seen_pools.add(pool_address)
                     self._save_seen_pools()
