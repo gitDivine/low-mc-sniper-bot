@@ -24,15 +24,9 @@ The system operates as a two-script architecture with a 4-tier execution pipelin
 
 ## Current State
 *   **Shadow Mode Runner:** Built, integrated, and verified with Telegram bot capabilities (`src/shadow/runner.py`, `src/shadow/telegram_bot.py`, `run_shadow.py`).
-*   **Data Hygiene Upgrades:** Added Unicode RTL Impersonation Scam Filter (`\u202e` etc.), T0 Snapshot Hygiene Floor ($10k+ mcap & $1k+ liquidity required; >$5M mcap rejected), and dynamic timeframe resolution labels (`14.0m` vs `24.0h`).
+*   **Wide-Scope Collection Architecture:** Configured discovery to collect wide-scope raw data ($5k–$500k MCap & $1k+ Liquidity) so un-biased raw data is preserved while Gate 11a/11b spec cutoffs ($30k–$100k MCap) are applied strictly at analysis time.
+*   **Data Hygiene & Disambiguation:** Integrated Unicode RTL Impersonation Scam Filter (`\u202e` etc.), dynamic timeframe labels (`24.0h`), and `Symbol (ShortAddress)` format to prevent ticker collisions on-chain.
 *   **Rate Limiting:** Added dedicated GeckoTerminal rate-limiter (0.4 req/s = 24 req/min) in `src/data_puller/api_client.py` to prevent 429 quota exhaustion when left online 24/7 on a VPS.
-*   **On-Chain T0 Gate Checks:** Real-time RPC checks for LP lock/burn (Gate 1), true T0 Top 10 holder % (Gate 4), true T0 Dev wallet % (Gate 5), Liq/MCap ratio (Gate 9), and Token-2022 security extensions (Gate 11a/11b).
-*   **Persistence:** Data stored continuously in `data/shadow/pending_tokens.json` and `data/shadow/resolved_tokens.csv`.
-*   **Next Focus:** Running Shadow Runner for 24–48 hours to collect a live dataset of 100–300+ resolved tokens with true launch-time gate snapshots.
-
----
-
-We completed the **Shadow Mode Runner** module (`src/shadow/runner.py` and `run_shadow.py`). It monitors live pool launches via GeckoTerminal, executes immediate on-chain RPC calls at launch to capture true T0 holder/dev percentages and LP lock status, queues pending tokens in `data/shadow/pending_tokens.json`, and evaluates 24h ROI outcomes into `data/shadow/resolved_tokens.csv`. We also added dedicated rate limiting to `api_client.py` (capped at 24 req/min for GeckoTerminal and 240 req/min for Helius RPC) to guarantee zero 429 errors during 24/7 long-term operation on VPS servers.
 
 ---
 
