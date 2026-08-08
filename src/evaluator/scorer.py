@@ -53,16 +53,28 @@ class OfflineScorer:
 
         if file_path.suffix.lower() == ".json":
             with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            records = [TokenSnapshotRecord.model_validate(r) for r in data]
+                raw_list = json.load(f)
         elif file_path.suffix.lower() == ".csv":
             df = pd.read_csv(file_path)
-            records = [TokenSnapshotRecord.model_validate(r) for r in df.to_dict(orient="records")]
+            raw_list = df.to_dict(orient="records")
         else:
             raise ValueError(f"Unsupported file extension: {file_path.suffix}")
 
-        logger.info(f"Loaded {len(records)} token records successfully.")
-        return records
+        normalized = []
+        for r in raw_list:
+            item = dict(r)
+            if "chain" not in item:
+                item["chain"] = item.get("network", "solana")
+            if "name" not in item:
+                item["name"] = item.get("symbol", "Unknown")
+            if "created_at_utc" not in item:
+                item["created_at_utc"] = item.get("t0_date", "")
+            if "age_hours" not in item:
+                item["age_hours"] = 0.5
+            normalized.append(TokenSnapshotRecord.model_validate(item))
+
+        logger.info(f"Loaded {len(normalized)} token records successfully.")
+        return normalized
 
     def evaluate_all(self, records: list[TokenSnapshotRecord]) -> list[ScoredTokenRecord]:
         """Run the short-circuit evaluation pipeline across all token records."""

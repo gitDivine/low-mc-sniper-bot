@@ -151,16 +151,10 @@ class ShadowRunner:
                 if has_rtl_scam:
                     logger.warning(f"RTL Scam Character detected in symbol/name ({symbol}) for pool {pool_address}. Flagging.")
 
-                # --- Hygiene Filter 2: Dust starting price / Mega-pool check ---
-                # Ignore uninitialized dust pools (<$1k liq or <$10k mcap) and fake mega-pools (>$5M mcap)
-                if mcap_usd < 10000.0 or liquidity_usd < 1000.0:
-                    logger.info(f"Skipping pre-fill dust pool: {symbol} (MCap: ${mcap_usd:,.0f}, Liq: ${liquidity_usd:,.0f})")
-                    self.seen_pools.add(pool_address)
-                    self._save_seen_pools()
-                    continue
-
-                if mcap_usd > 5000000.0:
-                    logger.info(f"Skipping established mega-pool: {symbol} (MCap: ${mcap_usd:,.0f})")
+                # --- Hygiene Filter 2: Strict Gate 11 Spec Target Scope ($30k-$100k MCap & >=$10k Liq) ---
+                # Skip pre-fill dust pools (<$30k MCap / <$10k Liq) and established/mega pools (>$100k MCap)
+                if mcap_usd < 30000.0 or mcap_usd > 100000.0 or liquidity_usd < 10000.0:
+                    logger.debug(f"Skipping out-of-scope pool: {symbol} (MCap: ${mcap_usd:,.0f}, Liq: ${liquidity_usd:,.0f})")
                     self.seen_pools.add(pool_address)
                     self._save_seen_pools()
                     continue
@@ -269,10 +263,14 @@ class ShadowRunner:
 
         liq_mcap_ratio = round(liquidity_usd / mcap_usd, 4) if mcap_usd > 0 else 0.0
 
+        short_addr = f" ({token_address[:5]}...)" if token_address and len(token_address) >= 5 else ""
+        display_symbol = f"{symbol}{short_addr}"
+
         return {
             "pool_address": pool_address,
             "token_address": token_address,
-            "symbol": symbol,
+            "symbol": display_symbol,
+            "raw_symbol": symbol,
             "network": self.network,
             "t0_timestamp": int(time.time()),
             "t0_date": datetime.now(timezone.utc).isoformat(),
