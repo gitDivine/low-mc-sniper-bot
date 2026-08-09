@@ -511,7 +511,7 @@ class ShadowRunner:
                 
                 # 1. Discover fresh pools & take T0 snapshot
                 try:
-                    await self.discover_and_snapshot(pages=2)
+                    await self.discover_and_snapshot(pages=10)
                 except Exception as e:
                     logger.error(f"Error during discovery pass: {e}")
 
