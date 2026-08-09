@@ -246,8 +246,15 @@ class ShadowRunner:
                 top10_sum = sum(acc["uiAmount"] for acc in ex_burn_accounts[:10])
                 t0_top10_pct = round((top10_sum / supply) * 100.0, 2)
 
-                if ex_burn_accounts:
-                    t0_dev_pct = round((ex_burn_accounts[0]["uiAmount"] / supply) * 100.0, 2)
+                # Exclude the AMM Bonding Curve Vault (#1 account if holding >40% supply) from Dev Wallet
+                non_pool_accounts = ex_burn_accounts
+                if ex_burn_accounts and (ex_burn_accounts[0]["uiAmount"] / supply) > 0.40:
+                    non_pool_accounts = ex_burn_accounts[1:]
+
+                if non_pool_accounts:
+                    t0_dev_pct = round((non_pool_accounts[0]["uiAmount"] / supply) * 100.0, 2)
+                else:
+                    t0_dev_pct = 0.0
 
             # 3. Real-Time LP Lock/Burn Check (Gate 1)
             lp_mint = await api_client.fetch_pool_lp_mint(pool_address)
@@ -313,23 +320,32 @@ class ShadowRunner:
 
             tfinal_price = 0.0
             tfinal_vol_24h = 0.0
+            tfinal_liq = 0.0
 
             # Try GeckoTerminal pool state first
             pool_data = await api_client.fetch_geckoterminal_pool(self.network, pool_address)
             if pool_data:
                 attr = pool_data.get("attributes", {})
                 tfinal_price = float(attr.get("base_token_price_usd") or 0.0)
+                tfinal_liq = float(attr.get("reserve_in_usd") or 0.0)
                 tfinal_vol_24h = float(attr.get("volume_usd", {}).get("h24", 0.0) or 0.0)
 
-            # Fallback to OHLCV candles if pool state returns 0
-            if tfinal_price <= 0:
+            # Liquidity Collapse Check: Drained/rugged pools returning price artifacts on zero reserves
+            is_liquidity_drained = (tfinal_liq < 500.0) or (t0_liq > 0 and (tfinal_liq / t0_liq) < 0.05)
+
+            # Fallback to OHLCV candles if pool state returns 0 AND liquidity is not drained
+            if tfinal_price <= 0 and not is_liquidity_drained:
                 ohlcv = await api_client.fetch_geckoterminal_ohlcv(self.network, pool_address, resolution="hour")
                 if ohlcv:
                     ohlcv.sort(key=lambda c: c[0])
                     tfinal_price = float(ohlcv[-1][4])
                     tfinal_vol_24h = sum(float(c[5]) for c in ohlcv)
 
-            roi = round(tfinal_price / t0_price, 4) if t0_price > 0 else 0.0
+            if is_liquidity_drained:
+                tfinal_price = 0.0
+                roi = 0.0
+            else:
+                roi = round(tfinal_price / t0_price, 4) if t0_price > 0 else 0.0
 
             # Calculate evaluation window label dynamically
             if eval_delay_seconds >= 3600:
