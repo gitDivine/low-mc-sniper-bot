@@ -337,8 +337,18 @@ class AsyncAPIClient:
                         return None
                     pk_bytes = raw_data[136:168]
                     return base58.b58encode(pk_bytes).decode('ascii')
-                elif owner in ("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"):
-                    # Pump.fun bonding curve or Raydium launchpad: liquidity is program-locked by protocol design
+                elif owner in (
+                    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", # Pump.fun
+                    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", # Pump.fun AMM
+                    "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", # Meteora DAMM v2
+                    "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB", # Meteora DAMM v2
+                    "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", # Meteora DLMM
+                    "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN", # Meteora DBC
+                    "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", # Orca Whirlpools
+                    "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", # Raydium CLMM
+                    "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"  # Raydium v4
+                ):
+                    # AMM bonding curves / concentrated liquidity: locked by protocol design
                     return "PROGRAM_LOCKED"
                 else:
                     logger.warning(f"Pool {pool_address} has unsupported owner: {owner}")
@@ -390,6 +400,86 @@ class AsyncAPIClient:
                 return acc_info
             except Exception as e:
                 logger.error(f"Error fetching token account info for {token_mint}: {e}")
+                continue
+        return None
+
+    @retry(
+        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=False,
+    )
+    async def fetch_token_account_authority(self, account_address: str) -> Optional[str]:
+        helius_rpc = f"https://mainnet.helius-rpc.com/?api-key={getattr(settings, 'HELIUS_API_KEY', '0182f0e1-1ebc-4396-9cc3-9e2443b1e9c6')}"
+        rpc_urls = [
+            helius_rpc,
+            "https://solana-rpc.publicnode.com",
+            "https://api.mainnet-beta.solana.com",
+        ]
+        await self.rate_limiter.acquire()
+        client = await self.get_client()
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                account_address,
+                {"encoding": "jsonParsed"}
+            ]
+        }
+        for url in rpc_urls:
+            try:
+                res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+                if res.status_code != 200:
+                    continue
+                data = res.json()
+                acc_info = data.get("result", {}).get("value")
+                if not acc_info:
+                    continue
+                
+                parsed_info = acc_info.get("data", {}).get("parsed", {}).get("info", {})
+                return parsed_info.get("owner")
+            except Exception:
+                continue
+        return None
+
+    @retry(
+        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=False,
+    )
+    async def fetch_account_owner(self, account_address: str) -> Optional[str]:
+        helius_rpc = f"https://mainnet.helius-rpc.com/?api-key={getattr(settings, 'HELIUS_API_KEY', '0182f0e1-1ebc-4396-9cc3-9e2443b1e9c6')}"
+        rpc_urls = [
+            helius_rpc,
+            "https://solana-rpc.publicnode.com",
+            "https://api.mainnet-beta.solana.com",
+        ]
+        await self.rate_limiter.acquire()
+        client = await self.get_client()
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                account_address,
+                {"encoding": "base64"}
+            ]
+        }
+        for url in rpc_urls:
+            try:
+                res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+                if res.status_code != 200:
+                    continue
+                data = res.json()
+                acc_info = data.get("result", {}).get("value")
+                if not acc_info:
+                    continue
+                return acc_info.get("owner")
+            except Exception:
                 continue
         return None
 

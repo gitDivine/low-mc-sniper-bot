@@ -245,11 +245,33 @@ class ShadowRunner:
                 # Filter out system burn addresses
                 ex_burn_accounts = [acc for acc in accounts if acc["address"] not in SOLANA_BURN_ADDRESSES]
                 
-                # Exclude AMM Liquidity Vaults / Bonding Curves from retail holder calculations
-                # On Solana AMMs (Raydium / Pump.fun), the #1 account holding >30% supply is the AMM Pool Vault
-                non_vault_accounts = ex_burn_accounts
-                if ex_burn_accounts and (ex_burn_accounts[0]["uiAmount"] / supply) > 0.30:
-                    non_vault_accounts = ex_burn_accounts[1:]
+                # Exclude AMM Liquidity Vaults / Bonding Curves using true on-chain identity
+                KNOWN_AMM_PROGRAM_IDS = {
+                    "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", # Raydium v4
+                    "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1", # Raydium v4
+                    "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", # Raydium CPMM
+                    "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", # Raydium CLMM
+                    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", # Pump.fun
+                    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", # Pump.fun AMM
+                    "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", # Meteora Dynamic AMM
+                    "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB", # Meteora DAMM v2
+                    "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", # Meteora DLMM
+                    "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN", # Meteora DBC
+                    "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", # Orca Whirlpools
+                }
+                non_vault_accounts = []
+                for acc in ex_burn_accounts:
+                    # Check large accounts (>5% supply) to see if they are actually AMM program vaults
+                    # by checking if their authority (the wallet) is owned by an AMM program (i.e. a PDA)
+                    # instead of the System Program (11111111111111111111111111111111).
+                    if acc["uiAmount"] / supply > 0.05:
+                        authority = await api_client.fetch_token_account_authority(acc["address"])
+                        if authority:
+                            sys_owner = await api_client.fetch_account_owner(authority)
+                            if sys_owner in KNOWN_AMM_PROGRAM_IDS:
+                                logger.info(f"Excluded AMM vault account: {acc['address']} (Authority: {authority}, Owner: {sys_owner})")
+                                continue
+                    non_vault_accounts.append(acc)
 
                 top10_sum = sum(acc["uiAmount"] for acc in non_vault_accounts[:10])
                 t0_top10_pct = round((top10_sum / supply) * 100.0, 2)
@@ -333,6 +355,7 @@ class ShadowRunner:
                 tfinal_liq = float(attr.get("reserve_in_usd") or 0.0)
                 tfinal_vol_24h = float(attr.get("volume_usd", {}).get("h24", 0.0) or 0.0)
 
+            t0_liq = snapshot.get("t0_liquidity_usd", 0.0)
             # Liquidity Collapse Check: Drained/rugged pools returning price artifacts on zero reserves
             is_liquidity_drained = (tfinal_liq < 500.0) or (t0_liq > 0 and (tfinal_liq / t0_liq) < 0.05)
 
@@ -519,3 +542,10 @@ class ShadowRunner:
             listener_task.cancel()
             await api_client.close()
             logger.info("Shadow Runner loop terminated gracefully.")
+
+if __name__ == "__main__":
+    runner = ShadowRunner(network="solana")
+    try:
+        asyncio.run(runner.run_loop(poll_interval=300, eval_delay_seconds=86400))
+    except KeyboardInterrupt:
+        print("Bot stopped by user.")
