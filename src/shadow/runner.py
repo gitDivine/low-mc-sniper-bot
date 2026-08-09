@@ -242,17 +242,20 @@ class ShadowRunner:
             accounts = await api_client.fetch_solana_token_largest_accounts(token_address)
 
             if supply and accounts and supply > 0:
+                # Filter out system burn addresses
                 ex_burn_accounts = [acc for acc in accounts if acc["address"] not in SOLANA_BURN_ADDRESSES]
-                top10_sum = sum(acc["uiAmount"] for acc in ex_burn_accounts[:10])
+                
+                # Exclude AMM Liquidity Vaults / Bonding Curves from retail holder calculations
+                # On Solana AMMs (Raydium / Pump.fun), the #1 account holding >30% supply is the AMM Pool Vault
+                non_vault_accounts = ex_burn_accounts
+                if ex_burn_accounts and (ex_burn_accounts[0]["uiAmount"] / supply) > 0.30:
+                    non_vault_accounts = ex_burn_accounts[1:]
+
+                top10_sum = sum(acc["uiAmount"] for acc in non_vault_accounts[:10])
                 t0_top10_pct = round((top10_sum / supply) * 100.0, 2)
 
-                # Exclude the AMM Bonding Curve Vault (#1 account if holding >40% supply) from Dev Wallet
-                non_pool_accounts = ex_burn_accounts
-                if ex_burn_accounts and (ex_burn_accounts[0]["uiAmount"] / supply) > 0.40:
-                    non_pool_accounts = ex_burn_accounts[1:]
-
-                if non_pool_accounts:
-                    t0_dev_pct = round((non_pool_accounts[0]["uiAmount"] / supply) * 100.0, 2)
+                if non_vault_accounts:
+                    t0_dev_pct = round((non_vault_accounts[0]["uiAmount"] / supply) * 100.0, 2)
                 else:
                     t0_dev_pct = 0.0
 
