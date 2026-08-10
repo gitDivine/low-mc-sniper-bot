@@ -379,10 +379,20 @@ class ShadowRunner:
             else:
                 win_str = f"{round(eval_delay_seconds / 60)}m"
 
+            # Gate 4 & 5 verification against outcome status
+            t0_top10 = snapshot.get("t0_top10_holder_pct", 100.0)
+            t0_dev = snapshot.get("t0_dev_wallet_pct", 100.0)
+            passed_gate4 = t0_top10 <= settings.GATE_4_TOP10_HOLDER_MAX_PCT
+            passed_gate5 = t0_dev <= settings.GATE_5_DEV_WALLET_MAX_PCT
+
             # Outcome Classification
             if roi >= 2.0:
-                label = "Winner"
-                reason = f"{win_str} ROI was {roi:.2f}x"
+                if passed_gate4 and passed_gate5:
+                    label = "Winner"
+                    reason = f"{win_str} ROI was {roi:.2f}x"
+                else:
+                    label = "Scam / washed"
+                    reason = f"ROI {roi:.2f}x but failed Gate 4/5 (Top10: {t0_top10}%, Dev: {t0_dev}%)"
             elif roi <= 0.2:
                 label = "Rug / dead"
                 reason = f"{win_str} ROI plummeted to {roi:.2f}x"

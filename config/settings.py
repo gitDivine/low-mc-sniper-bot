@@ -41,8 +41,8 @@ class Settings(BaseSettings):
 
     # 14-Gate Thresholds (Section 3 Starting Hypotheses)
     GATE_1_LP_LOCK_MIN_DAYS: int = 30
-    GATE_4_TOP10_HOLDER_MAX_PCT: float = 20.0
-    GATE_5_DEV_WALLET_MAX_PCT: float = 3.0
+    GATE_4_TOP10_HOLDER_MAX_PCT: float = 25.0
+    GATE_5_DEV_WALLET_MAX_PCT: float = 5.0
     GATE_6_MIN_HOLDER_COUNT: int = 75
     GATE_7_MIN_BUY_SELL_RATIO: float = 2.0
     GATE_8_MAX_SINGLE_WALLET_VOL_PCT: float = 25.0
