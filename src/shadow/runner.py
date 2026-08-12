@@ -174,6 +174,13 @@ class ShadowRunner:
                     has_rtl_scam=has_rtl_scam,
                 )
 
+                if snapshot.get("status") == "DROPPED":
+                    self.seen_pools.add(pool_address)
+                    self.resolved_tokens.append(snapshot)
+                    self._save_resolved_tokens()
+                    self._save_seen_pools()
+                    continue
+
                 self.seen_pools.add(pool_address)
                 self.pending_tokens[pool_address] = snapshot
                 new_count += 1
@@ -203,11 +210,38 @@ class ShadowRunner:
         has_rtl_scam: bool = False,
     ) -> dict[str, Any]:
         """Runs immediate RPC calls for Gates 1, 4, 5, 9, 11a, 11b at launch moment (T0)."""
-        t0_top10_pct = 15.0
-        t0_dev_pct = 1.0
-        t0_lp_locked_days = 0
-        is_token_2022 = False
-        has_malicious_ext = False
+        liq_mcap_ratio = round(liquidity_usd / mcap_usd, 4) if mcap_usd > 0 else 0.0
+        short_addr = f" ({token_address[:5]}...)" if token_address and len(token_address) >= 5 else ""
+        display_symbol = f"{symbol}{short_addr}"
+
+        snapshot = {
+            "pool_address": pool_address,
+            "token_address": token_address,
+            "symbol": display_symbol,
+            "raw_symbol": symbol,
+            "network": self.network,
+            "t0_timestamp": int(time.time()),
+            "t0_date": datetime.now(timezone.utc).isoformat(),
+            "t0_price_usd": price_usd,
+            "t0_liquidity_usd": liquidity_usd,
+            "t0_mcap_usd": mcap_usd,
+            "t0_volume_usd_15m": vol_15m,
+            "t0_top10_holder_pct": 15.0,
+            "t0_dev_wallet_pct": 1.0,
+            "t0_lp_locked_days": 0,
+            "t0_is_token_2022": False,
+            "t0_has_malicious_extensions": False,
+            "t0_has_rtl_scam": has_rtl_scam,
+            "t0_buy_sell_ratio": 0.0,
+            "t0_holder_count_exact": None,
+            "t0_holder_count_floor": None,
+            "t0_holder_count_capped": False,
+            "t0_avg_tx_size": 0.0,
+            "t0_ratio_window": "",
+            "liq_mcap_ratio": liq_mcap_ratio,
+            "status": "PENDING",
+            "drop_reason": None,
+        }
 
         if self.network == "solana" and token_address:
             # 1. Token-2022 & Extensions Check (Gate 11a/11b)
@@ -215,7 +249,7 @@ class ShadowRunner:
             if token_info:
                 owner = token_info.get("owner", "")
                 if owner == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb":
-                    is_token_2022 = True
+                    snapshot["t0_is_token_2022"] = True
                     # Check base64 extensions
                     data_b64 = token_info.get("data", [""])[0]
                     if data_b64:
@@ -229,10 +263,10 @@ class ShadowRunner:
                                     ext_type = int.from_bytes(raw_data[offset:offset+2], "little")
                                     ext_len = int.from_bytes(raw_data[offset+2:offset+4], "little")
                                     if ext_type in (1, 10): # TransferFeeConfig or PermanentDelegate
-                                        has_malicious_ext = True
+                                        snapshot["t0_has_malicious_extensions"] = True
                                     elif ext_type == 12: # DefaultAccountState
                                         if offset + 4 + 1 <= len(raw_data) and raw_data[offset+4] == 2:
-                                            has_malicious_ext = True
+                                            snapshot["t0_has_malicious_extensions"] = True
                                     offset += 4 + ext_len
                         except Exception:
                             pass
@@ -274,103 +308,95 @@ class ShadowRunner:
                     non_vault_accounts.append(acc)
 
                 top10_sum = sum(acc["uiAmount"] for acc in non_vault_accounts[:10])
-                t0_top10_pct = round((top10_sum / supply) * 100.0, 2)
+                snapshot["t0_top10_holder_pct"] = round((top10_sum / supply) * 100.0, 2)
 
                 if non_vault_accounts:
-                    t0_dev_pct = round((non_vault_accounts[0]["uiAmount"] / supply) * 100.0, 2)
+                    snapshot["t0_dev_wallet_pct"] = round((non_vault_accounts[0]["uiAmount"] / supply) * 100.0, 2)
                 else:
-                    t0_dev_pct = 0.0
+                    snapshot["t0_dev_wallet_pct"] = 0.0
 
             # 3. Real-Time LP Lock/Burn Check (Gate 1)
             lp_mint = await api_client.fetch_pool_lp_mint(pool_address)
             if lp_mint == "PROGRAM_LOCKED":
-                t0_lp_locked_days = 365
+                snapshot["t0_lp_locked_days"] = 365
             elif lp_mint:
                 lp_supply = await api_client.fetch_solana_token_supply(lp_mint)
                 lp_accounts = await api_client.fetch_solana_token_largest_accounts(lp_mint)
                 if lp_supply and lp_accounts and lp_supply > 0:
                     for acc in lp_accounts[:3]:
                         if acc["address"] in SOLANA_BURN_ADDRESSES and (acc["uiAmount"] / lp_supply) >= 0.80:
-                            t0_lp_locked_days = 365
+                            snapshot["t0_lp_locked_days"] = 365
                             break
 
             # 4. T0 Tier 3 Metrics via DexScreener (Gate 6 proxy, Gate 7, Gate 13)
             dex_data = await api_client.fetch_dexscreener_tokens([token_address])
+            if not dex_data:
+                logger.error(f"DexScreener payload completely empty or missing for {token_address}")
+                snapshot["status"] = "DROPPED"
+                snapshot["outcome_label"] = "Data Incomplete"
+                snapshot["outcome_reason"] = "DexScreener payload completely empty"
+                snapshot["drop_reason"] = "data_incomplete_dexscreener"
+                return snapshot
             
-            t0_buy_sell_ratio = 0.0
-            t0_unique_makers = 0
-            t0_avg_tx_size = 0.0
+            # Find the matching pair by pool address, or fallback to the most liquid pair
+            target_pair = next((p for p in dex_data if p.get("pairAddress", "").lower() == pool_address.lower()), dex_data[0])
+            
+            txns = target_pair.get("txns", {})
+            volume_dict = target_pair.get("volume", {})
+            
+            if "m5" not in txns and "h1" not in txns:
+                logger.error(f"DexScreener payload missing txns data for {token_address} (missing both txns.m5 and txns.h1). Dropping token.")
+                snapshot["status"] = "DROPPED"
+                snapshot["outcome_label"] = "Data Incomplete"
+                snapshot["outcome_reason"] = "DexScreener missing txns data"
+                snapshot["drop_reason"] = "data_incomplete_dexscreener"
+                return snapshot
+            elif "m5" not in txns:
+                logger.warning(f"DexScreener payload missing txns.m5 for {token_address} (falling back to txns.h1)")
+                
+            m5_tx = txns.get("m5", {})
+            h1_tx = txns.get("h1", {})
+            
+            m5_buys = m5_tx.get("buys", 0)
+            m5_sells = m5_tx.get("sells", 0)
+            h1_buys = h1_tx.get("buys", 0)
+            h1_sells = h1_tx.get("sells", 0)
+            
             t0_ratio_window = ""
+            t0_buy_sell_ratio = 0.0
+            t0_avg_tx_size = 0.0
 
-            if dex_data:
-                # Find the matching pair by pool address, or fallback to the most liquid pair
-                target_pair = next((p for p in dex_data if p.get("pairAddress", "").lower() == pool_address.lower()), dex_data[0])
+            if (m5_buys + m5_sells) > 0:
+                snapshot["t0_ratio_window"] = "m5"
+                snapshot["t0_buy_sell_ratio"] = round(m5_buys / m5_sells, 2) if m5_sells > 0 else float(m5_buys)
+                total_tx = m5_buys + m5_sells
+                vol_window = float(volume_dict.get("m5", 0.0))
+            elif (h1_buys + h1_sells) > 0:
+                snapshot["t0_ratio_window"] = "h1"
+                snapshot["t0_buy_sell_ratio"] = round(h1_buys / h1_sells, 2) if h1_sells > 0 else float(h1_buys)
+                total_tx = h1_buys + h1_sells
+                vol_window = float(volume_dict.get("h1", 0.0))
+            else:
+                total_tx = 0
+                vol_window = 0.0
                 
-                txns = target_pair.get("txns", {})
-                volume_dict = target_pair.get("volume", {})
-                
-                m5_tx = txns.get("m5", {})
-                h1_tx = txns.get("h1", {})
-                
-                m5_buys = m5_tx.get("buys", 0)
-                m5_sells = m5_tx.get("sells", 0)
-                h1_buys = h1_tx.get("buys", 0)
-                h1_sells = h1_tx.get("sells", 0)
-                
-                if (m5_buys + m5_sells) > 0:
-                    t0_ratio_window = "m5"
-                    t0_buy_sell_ratio = round(m5_buys / m5_sells, 2) if m5_sells > 0 else float(m5_buys)
-                    total_tx = m5_buys + m5_sells
-                    vol_window = float(volume_dict.get("m5", 0.0))
-                elif (h1_buys + h1_sells) > 0:
-                    t0_ratio_window = "h1"
-                    t0_buy_sell_ratio = round(h1_buys / h1_sells, 2) if h1_sells > 0 else float(h1_buys)
-                    total_tx = h1_buys + h1_sells
-                    vol_window = float(volume_dict.get("h1", 0.0))
-                else:
-                    total_tx = 0
-                    vol_window = 0.0
-                    
-                if total_tx > 0:
-                    t0_avg_tx_size = round(vol_window / total_tx, 2)
-                    
-                # Makers proxy for unique buyers/holders
-                makers_dict = target_pair.get("makers", {})
-                if t0_ratio_window == "m5":
-                    t0_unique_makers = makers_dict.get("m5", 0)
-                elif t0_ratio_window == "h1":
-                    t0_unique_makers = makers_dict.get("h1", 0)
+            if total_tx > 0:
+                snapshot["t0_avg_tx_size"] = round(vol_window / total_tx, 2)
 
-        liq_mcap_ratio = round(liquidity_usd / mcap_usd, 4) if mcap_usd > 0 else 0.0
+            holder_count = await api_client.fetch_helius_das_holder_count(token_address, limit=100)
+            if holder_count is None:
+                logger.error(f"Failed to fetch holder count from Helius DAS for {token_address}. Dropping token.")
+                snapshot["status"] = "DROPPED"
+                snapshot["outcome_label"] = "Data Incomplete"
+                snapshot["outcome_reason"] = "Failed to fetch Helius DAS holder count"
+                snapshot["drop_reason"] = "data_incomplete_helius_das"
+                return snapshot
+            
+            snapshot["t0_holder_count_capped"] = holder_count >= 100
+            snapshot["t0_holder_count_exact"] = holder_count if not snapshot["t0_holder_count_capped"] else None
+            snapshot["t0_holder_count_floor"] = 100 if snapshot["t0_holder_count_capped"] else None
 
-        short_addr = f" ({token_address[:5]}...)" if token_address and len(token_address) >= 5 else ""
-        display_symbol = f"{symbol}{short_addr}"
-
-        return {
-            "pool_address": pool_address,
-            "token_address": token_address,
-            "symbol": display_symbol,
-            "raw_symbol": symbol,
-            "network": self.network,
-            "t0_timestamp": int(time.time()),
-            "t0_date": datetime.now(timezone.utc).isoformat(),
-            "t0_price_usd": price_usd,
-            "t0_liquidity_usd": liquidity_usd,
-            "t0_mcap_usd": mcap_usd,
-            "t0_volume_usd_15m": vol_15m,
-            "t0_top10_holder_pct": t0_top10_pct,
-            "t0_dev_wallet_pct": t0_dev_pct,
-            "t0_lp_locked_days": t0_lp_locked_days,
-            "t0_is_token_2022": is_token_2022,
-            "t0_has_malicious_extensions": has_malicious_ext,
-            "t0_has_rtl_scam": has_rtl_scam,
-            "t0_buy_sell_ratio": t0_buy_sell_ratio,
-            "t0_unique_makers": t0_unique_makers,
-            "t0_avg_tx_size": t0_avg_tx_size,
-            "t0_ratio_window": t0_ratio_window,
-            "liq_mcap_ratio": liq_mcap_ratio,
-            "status": "PENDING",
-        }
+        return snapshot
 
     # --- Outcome Resolution ---
 

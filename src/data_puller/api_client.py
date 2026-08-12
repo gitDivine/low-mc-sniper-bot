@@ -483,5 +483,52 @@ class AsyncAPIClient:
                 continue
         return None
 
+    @retry(
+        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def fetch_helius_das_holder_count(self, token_mint: str, limit: int = 100) -> Optional[int]:
+        """
+        Fetches the holder count of a token via Helius DAS getTokenAccounts.
+        If the response is rate-limited, times out, or malformed, it relies on retry logic,
+        and finally raises the exception (reraise=True) so the caller can fail loud.
+        """
+        api_key = getattr(settings, 'HELIUS_API_KEY', '0182f0e1-1ebc-4396-9cc3-9e2443b1e9c6')
+        url = f"https://mainnet.helius-rpc.com/?api-key={api_key}"
+        await self.rate_limiter.acquire()
+        client = await self.get_client()
+        
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTokenAccounts",
+            "params": {
+                "mint": token_mint,
+                "limit": limit
+            }
+        }
+        
+        logger.debug(f"POST {url} | method=getTokenAccounts mint={token_mint} limit={limit}")
+        res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+        
+        if res.status_code == 429:
+            logger.warning(f"Rate limited (429) on Helius DAS for {token_mint}. Triggering retry backoff...")
+            res.raise_for_status()
+        elif res.status_code >= 500:
+            logger.warning(f"Server error ({res.status_code}) on Helius DAS for {token_mint}. Triggering retry backoff...")
+            res.raise_for_status()
+            
+        res.raise_for_status()
+        
+        data = res.json()
+        if "result" not in data or "total" not in data["result"]:
+            logger.error(f"Malformed Helius DAS response for {token_mint}: {data}")
+            return None
+            
+        return data["result"]["total"]
+
 
 api_client = AsyncAPIClient()
