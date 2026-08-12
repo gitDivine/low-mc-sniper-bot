@@ -294,6 +294,53 @@ class ShadowRunner:
                             t0_lp_locked_days = 365
                             break
 
+            # 4. T0 Tier 3 Metrics via DexScreener (Gate 6 proxy, Gate 7, Gate 13)
+            dex_data = await api_client.fetch_dexscreener_tokens([token_address])
+            
+            t0_buy_sell_ratio = 0.0
+            t0_unique_makers = 0
+            t0_avg_tx_size = 0.0
+            t0_ratio_window = ""
+
+            if dex_data:
+                # Find the matching pair by pool address, or fallback to the most liquid pair
+                target_pair = next((p for p in dex_data if p.get("pairAddress", "").lower() == pool_address.lower()), dex_data[0])
+                
+                txns = target_pair.get("txns", {})
+                volume_dict = target_pair.get("volume", {})
+                
+                m5_tx = txns.get("m5", {})
+                h1_tx = txns.get("h1", {})
+                
+                m5_buys = m5_tx.get("buys", 0)
+                m5_sells = m5_tx.get("sells", 0)
+                h1_buys = h1_tx.get("buys", 0)
+                h1_sells = h1_tx.get("sells", 0)
+                
+                if (m5_buys + m5_sells) > 0:
+                    t0_ratio_window = "m5"
+                    t0_buy_sell_ratio = round(m5_buys / m5_sells, 2) if m5_sells > 0 else float(m5_buys)
+                    total_tx = m5_buys + m5_sells
+                    vol_window = float(volume_dict.get("m5", 0.0))
+                elif (h1_buys + h1_sells) > 0:
+                    t0_ratio_window = "h1"
+                    t0_buy_sell_ratio = round(h1_buys / h1_sells, 2) if h1_sells > 0 else float(h1_buys)
+                    total_tx = h1_buys + h1_sells
+                    vol_window = float(volume_dict.get("h1", 0.0))
+                else:
+                    total_tx = 0
+                    vol_window = 0.0
+                    
+                if total_tx > 0:
+                    t0_avg_tx_size = round(vol_window / total_tx, 2)
+                    
+                # Makers proxy for unique buyers/holders
+                makers_dict = target_pair.get("makers", {})
+                if t0_ratio_window == "m5":
+                    t0_unique_makers = makers_dict.get("m5", 0)
+                elif t0_ratio_window == "h1":
+                    t0_unique_makers = makers_dict.get("h1", 0)
+
         liq_mcap_ratio = round(liquidity_usd / mcap_usd, 4) if mcap_usd > 0 else 0.0
 
         short_addr = f" ({token_address[:5]}...)" if token_address and len(token_address) >= 5 else ""
@@ -317,6 +364,10 @@ class ShadowRunner:
             "t0_is_token_2022": is_token_2022,
             "t0_has_malicious_extensions": has_malicious_ext,
             "t0_has_rtl_scam": has_rtl_scam,
+            "t0_buy_sell_ratio": t0_buy_sell_ratio,
+            "t0_unique_makers": t0_unique_makers,
+            "t0_avg_tx_size": t0_avg_tx_size,
+            "t0_ratio_window": t0_ratio_window,
             "liq_mcap_ratio": liq_mcap_ratio,
             "status": "PENDING",
         }
