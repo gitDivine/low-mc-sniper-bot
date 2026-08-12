@@ -31,6 +31,7 @@ The system operates as a two-script architecture with a 4-tier execution pipelin
 ---
 
 ## Change Log
+- **2026-08-12** - **IMPORTANT** - Pivoted Gate 6 from the inaccurate `makers` proxy to a true on-chain holder count using Helius DAS. Implemented an early-exit optimization (`limit=100`) to strictly protect the 2 req/s DAS rate limit while preserving full analytical detail. Restructured the T0 pipeline with a "fail-loud" architecture that explicitly tags dropped tokens with a `drop_reason` field and saves them directly to the resolved dataset, eliminating ambiguous data-loss gaps.
 - **2026-08-10** - **IMPORTANT** - Identified and quantified a ~27% undercount limitation in GeckoTerminal's pool discovery via RPC cross-checking. Calibrated Gate 4 to 25.0% and Gate 5 to 5.0% based on the cleaned organic sample. Unified `Winner` outcome labeling in the Shadow Runner to strictly enforce these gate cutoffs at T0, eliminating wash-traded scam bias from downstream analytics.
 - **2026-08-07** - **CRITICAL** - Implemented Shadow Mode Runner (`src/shadow/runner.py`, `run_shadow.py`). Added dedicated 0.4 req/s GeckoTerminal rate limiter to `api_client.py` for rate-limit safe long-term VPS monitoring.
 - **2026-08-06** - **IMPORTANT** - Fixed historical outcome labeler in `harvester.py` to use ROI-only logic, fixing the zero-liquidity stub bug that caused false "Rug/dead" labels.
