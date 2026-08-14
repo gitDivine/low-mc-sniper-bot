@@ -153,10 +153,18 @@ class OfflineScorer:
 
         # --- Tier 3: Momentum & Wash-Trade Filters ---
 
-        # Gate 6: Holder count >= 75
-        scored.gate_6_holder_count = record.t0_holder_count >= settings.GATE_6_MIN_HOLDER_COUNT
+        # Gate 6: True Holder count >= GATE_6_MIN_HOLDER_COUNT
+        count_exact = getattr(record, 't0_holder_count_exact', None)
+        count_capped = getattr(record, 't0_holder_count_capped', False)
+        
+        scored.gate_6_holder_count = count_capped or (count_exact is not None and count_exact >= settings.GATE_6_MIN_HOLDER_COUNT)
+        
         if not scored.gate_6_holder_count:
-            return self._fail_record(scored, f"Gate 6 (Holders {record.t0_holder_count} < {settings.GATE_6_MIN_HOLDER_COUNT})", "Tier 3", gates_passed)
+            if count_exact == 0:
+                return self._fail_record(scored, "Gate 6 (Unindexed Lag: Holder count exactly 0)", "Tier 3", gates_passed)
+            else:
+                val_str = str(count_exact) if count_exact is not None else "None"
+                return self._fail_record(scored, f"Gate 6 (Failed Low Holders: {val_str} < {settings.GATE_6_MIN_HOLDER_COUNT})", "Tier 3", gates_passed)
         gates_passed += 1
 
         # Gate 7: Buy/sell tx ratio >= 2:1
