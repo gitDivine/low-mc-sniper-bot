@@ -44,13 +44,28 @@ class Settings(BaseSettings):
     GATE_4_TOP10_HOLDER_MAX_PCT: float = 25.0
     GATE_5_DEV_WALLET_MAX_PCT: float = 5.0
     GATE_6_MIN_HOLDER_COUNT: int = 50
-    GATE_7_MIN_BUY_SELL_RATIO: float = 2.0
+    
+    # Gate 7: Buy/Sell Ratio (Mode-Specific)
+    # - Micro Mode: Acts as a sanity check only (0.5 floor) to drop tokens with completely broken/zero buy data.
+    # - Graduate Mode: Acts as a strict secondary anti-manipulation filter (0.5 to 2.5). See MODE_GRAD_MAX_BUY_SELL_RATIO.
+    GATE_7_MIN_BUY_SELL_RATIO: float = 0.5
     GATE_8_MAX_SINGLE_WALLET_VOL_PCT: float = 25.0
-    GATE_9_MIN_LIQ_MCAP_RATIO: float = 0.25
+    # GATE_9_MIN_LIQ_MCAP_RATIO: float = 0.25  # Replaced by Two-Mode logic
     GATE_10_MIN_UNIQUE_BUYERS: int = 20
-    GATE_11A_MIN_MCAP_USD: float = 30_000.0
-    GATE_11A_MAX_MCAP_USD: float = 100_000.0
-    GATE_11B_MIN_ABSOLUTE_LIQ_USD: float = 10_000.0
+    # Two-Mode Configuration (Gate 9 & 11)
+    MODE_MICRO_MIN_MCAP_USD: float = 5_000.0
+    MODE_MICRO_MAX_MCAP_USD: float = 30_000.0
+    MODE_MICRO_MIN_LIQ_USD: float = 10_000.0
+    MODE_MICRO_MIN_LIQ_RATIO: float = 0.25
+    MODE_MICRO_MAX_LIQ_RATIO: float = 3.0
+    
+    MODE_GRAD_MIN_MCAP_USD: float = 150_000.0
+    MODE_GRAD_MAX_MCAP_USD: float = 500_000.0
+    MODE_GRAD_MIN_LIQ_USD: float = 10_000.0
+    MODE_GRAD_MIN_LIQ_RATIO: float = 0.03
+    MODE_GRAD_MAX_LIQ_RATIO: float = 0.20
+    MODE_GRAD_MAX_BUY_SELL_RATIO: float = 2.5
+    
     GATE_12_CLUSTER_MAX_WALLETS_SAME_SOURCE: int = 4  # 5+ is a fail
     GATE_12_CLUSTER_WINDOW_SECONDS: int = 60
     GATE_14_MIN_AGE_MINUTES: int = 15

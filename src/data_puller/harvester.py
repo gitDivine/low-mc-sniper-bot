@@ -73,6 +73,7 @@ class TokenSnapshotRecord(BaseModel):
     t0_mint_renounced: bool = True
     t0_honeypot_pass: bool = True
     t0_cluster_pass: bool = True
+    t0_forensics_collected: bool = False
     
     # New Spec v2 Fields
     t0_is_token_2022: bool = False

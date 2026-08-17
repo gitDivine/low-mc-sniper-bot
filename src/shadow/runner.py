@@ -145,6 +145,17 @@ class ShadowRunner:
                 
                 volume_dict = attributes.get("volume_usd", {})
                 vol_15m = float(volume_dict.get("m5", 0.0) or volume_dict.get("h1", 0.0) or 0.0)
+                
+                # Calculate age_hours from pool_created_at
+                pool_created_at_str = attributes.get("pool_created_at")
+                age_hours = 0.5  # default if missing
+                if pool_created_at_str:
+                    try:
+                        from datetime import datetime, timezone
+                        pool_dt = datetime.fromisoformat(pool_created_at_str.replace('Z', '+00:00'))
+                        age_hours = (datetime.now(timezone.utc) - pool_dt).total_seconds() / 3600.0
+                    except Exception as e:
+                        logger.warning(f"Failed to parse pool_created_at '{pool_created_at_str}': {e}")
 
                 # --- Hygiene Filter 1: Unicode RTL Impersonation Scam Check ---
                 has_rtl_scam = has_rtl_control_chars(name) or has_rtl_control_chars(symbol)
@@ -171,6 +182,7 @@ class ShadowRunner:
                     liquidity_usd=liquidity_usd,
                     mcap_usd=mcap_usd,
                     vol_15m=vol_15m,
+                    age_hours=age_hours,
                     has_rtl_scam=has_rtl_scam,
                 )
 
@@ -207,6 +219,7 @@ class ShadowRunner:
         liquidity_usd: float,
         mcap_usd: float,
         vol_15m: float,
+        age_hours: float,
         has_rtl_scam: bool = False,
     ) -> dict[str, Any]:
         """Runs immediate RPC calls for Gates 1, 4, 5, 9, 11a, 11b at launch moment (T0)."""
@@ -222,6 +235,7 @@ class ShadowRunner:
             "network": self.network,
             "t0_timestamp": int(time.time()),
             "t0_date": datetime.now(timezone.utc).isoformat(),
+            "age_hours": age_hours,
             "t0_price_usd": price_usd,
             "t0_liquidity_usd": liquidity_usd,
             "t0_mcap_usd": mcap_usd,
@@ -237,6 +251,11 @@ class ShadowRunner:
             "t0_holder_count_floor": None,
             "t0_holder_count_capped": False,
             "t0_avg_tx_size": 0.0,
+            "t0_single_wallet_vol_pct": 0.0,  # Forensic field to be populated
+            "pool_slot": 0,                   # Forensic field to be populated
+            "creator_funding_slot": 0,        # Forensic field to be populated
+            "pool_time": 0,                   # Forensic field to be populated
+            "t0_forensics_collected": False,  # Flag to indicate if forensic data was collected
             "t0_ratio_window": "",
             "liq_mcap_ratio": liq_mcap_ratio,
             "status": "PENDING",

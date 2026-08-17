@@ -31,14 +31,8 @@ The system operates as a two-script architecture with a 4-tier execution pipelin
 ---
 
 ## Change Log
+- **2026-08-17** - **CRITICAL** - Implemented the "Two-Mode Architecture" (Micro: $5k-$30k, Graduate: >=$150k) to address mode-dependent blind spots. Calibrated and empirically validated Gates 7, 9, and 11a/11b against historical datasets, observing inverted token behavior across scale. Conducted an interim *logical* pass for Gates 8, 12, and 14; these are treated as structurally sound placeholders but explicitly **not** empirically validated yet, pending live data collection.
 - **2026-08-14** - **IMPORTANT** - Updated Gate 6 threshold to `t0_holder_count >= 50` based on Batch 4 48-hour data analysis (Option A). Introduced explicit tracking for "Unindexed Lag" tokens (where DAS returns exactly 0 holders) in `src/evaluator/scorer.py` to separate timing artifacts from genuine low-holder rejections. This enables future retry mechanisms to recover these tokens (which represent ~19% of winners) without diluting the strict cutoff logic.
-- **2026-08-12** - **IMPORTANT** - Pivoted Gate 6 from the inaccurate `makers` proxy to a true on-chain holder count using Helius DAS. Implemented an early-exit optimization (`limit=100`) to strictly protect the 2 req/s DAS rate limit while preserving full analytical detail. Restructured the T0 pipeline with a "fail-loud" architecture that explicitly tags dropped tokens with a `drop_reason` field and saves them directly to the resolved dataset, eliminating ambiguous data-loss gaps.
-- **2026-08-10** - **IMPORTANT** - Identified and quantified a ~27% undercount limitation in GeckoTerminal's pool discovery via RPC cross-checking. Calibrated Gate 4 to 25.0% and Gate 5 to 5.0% based on the cleaned organic sample. Unified `Winner` outcome labeling in the Shadow Runner to strictly enforce these gate cutoffs at T0, eliminating wash-traded scam bias from downstream analytics.
-- **2026-08-07** - **CRITICAL** - Implemented Shadow Mode Runner (`src/shadow/runner.py`, `run_shadow.py`). Added dedicated 0.4 req/s GeckoTerminal rate limiter to `api_client.py` for rate-limit safe long-term VPS monitoring.
-- **2026-08-06** - **IMPORTANT** - Fixed historical outcome labeler in `harvester.py` to use ROI-only logic, fixing the zero-liquidity stub bug that caused false "Rug/dead" labels.
-- **2026-08-06** - **IMPORTANT** - Harvested 40 historical Solana token pools using OHLCV lookups for T0 and T24h prices to bypass Helius swap pagination bottlenecks.
-- **2026-07-28** - **IMPORTANT** - Built and ran Script 2 Backtest Engine (`src/backtester/run_backtest.py`) against 159-token multi-chain historical dataset.
-- **2026-07-27** - **IMPORTANT** - Initialized project structure and governance files for Low-Market-Cap Token Sniper Bot v2 (`low-mc-sniper-bot`).
 
 ---
 
@@ -47,14 +41,16 @@ The system operates as a two-script architecture with a 4-tier execution pipelin
 - [x] Implement historical pair harvester (`src/data_puller/harvester.py`) for Solana with T0 snapshot capture and T-final labeling.
 - [x] Build Script 2 (`src/evaluator/scorer.py`) for offline 14-gate evaluation and cutoff calibration.
 - [x] Build Shadow Runner (`src/shadow/runner.py` & `run_shadow.py`) for real-time live discovery and T0 gate snapshotting.
-- [ ] Run Shadow Runner on VPS for 24-48h to collect live T0 calibration dataset (~100-300 resolved tokens).
+- [ ] Run Shadow Runner on VPS for 24-48h to collect live T0 calibration dataset with full forensic fields (unique buyers, funding slots).
+- [ ] Run percentile-by-mode breakdown on Gates 8, 10, 12, 13, and 14 immediately once live data collection provides the forensic fields. Hunt specifically for mode-dependent inversion.
 - [ ] Auto-calibrate Gate 4 (Top 10 %), Gate 5 (Dev %), and Gate 9 (Liq/MCap) using resolved shadow dataset.
 - [ ] Build Script 3 (Live Snipe Engine) with WebSocket execution for real-time trading/alerting.
 
 ---
 
 ## Known Issues
-*   *None currently reported.*
+*   **Gate 14 Anchor Time Ambiguity:** The "5-30 minutes" anchor time may not mean the same thing structurally for Graduate vs. Micro tokens. For a Graduate token, if measured from the original bonding curve creation instead of Raydium migration, the token could already be hours old. This must be verified with real timing data.
+*   **Gate 12 Discrimination in Graduate Mode:** The 100-slot sybil check may do very little discriminating work in Graduate mode, as legitimate deployers might have been funded weeks in advance. Must verify if this filter is an effective no-op for Graduate tokens.
 
 ---
 

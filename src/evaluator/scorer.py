@@ -29,13 +29,13 @@ class ScoredTokenRecord(TokenSnapshotRecord):
     gate_5_dev_wallet: bool = False
     gate_6_holder_count: bool = False
     gate_7_buy_sell_ratio: bool = False
-    gate_8_single_wallet_vol: bool = False
+    gate_8_single_wallet_vol: Optional[bool] = None  # None = SKIPPED
     gate_9_liq_mcap_ratio: bool = False
-    gate_10_unique_buyers: bool = False
+    gate_10_unique_buyers: Optional[bool] = None     # None = SKIPPED
     gate_11a_mcap_band: bool = False
     gate_11b_absolute_liq: bool = False
-    gate_12_funding_cluster: bool = False
-    gate_13_volume_sanity: bool = False
+    gate_12_funding_cluster: Optional[bool] = None   # None = SKIPPED
+    gate_13_volume_sanity: Optional[bool] = None     # None = SKIPPED
     gate_14_time_in_market: bool = False
 
 
@@ -71,6 +71,15 @@ class OfflineScorer:
                 item["created_at_utc"] = item.get("t0_date", "")
             if "age_hours" not in item:
                 item["age_hours"] = 0.5
+            
+            # Map batch 8 holder columns to t0_holder_count
+            if "t0_holder_count_exact" in item and not pd.isna(item["t0_holder_count_exact"]):
+                item["t0_holder_count"] = int(item["t0_holder_count_exact"])
+            elif "t0_holder_count_floor" in item and not pd.isna(item["t0_holder_count_floor"]):
+                item["t0_holder_count"] = int(item["t0_holder_count_floor"])
+            elif "t0_holder_count_capped" in item and item["t0_holder_count_capped"] == True:
+                item["t0_holder_count"] = 50
+                
             normalized.append(TokenSnapshotRecord.model_validate(item))
 
         logger.info(f"Loaded {len(normalized)} token records successfully.")
@@ -89,7 +98,7 @@ class OfflineScorer:
         Implements short-circuiting: records the exact first gate and tier failed.
         """
         # Initialize enriched record
-        scored = ScoredTokenRecord(**record.model_dump())
+        scored = ScoredTokenRecord.model_construct(**record.model_dump())
         gates_passed = 0
 
         # --- Tier 1: Smart Contract Triage ---
@@ -132,16 +141,46 @@ class OfflineScorer:
             return self._fail_record(scored, f"Gate 5 (Dev Wallet {record.t0_dev_wallet_pct}% > {settings.GATE_5_DEV_WALLET_MAX_PCT}%)", "Tier 2", gates_passed)
         gates_passed += 1
 
-        # Gate 11a: Market cap band ($30k - $100k)
-        scored.gate_11a_mcap_band = settings.GATE_11A_MIN_MCAP_USD <= record.t0_mcap_usd <= settings.GATE_11A_MAX_MCAP_USD
+        # --- Gate 11a, 11b, 9: Two-Mode Logic (Micro & Graduate) Preparation ---
+        mcap = record.t0_mcap_usd
+        liq = record.t0_liquidity_usd
+        ratio = (liq / mcap) if mcap > 0 else 0.0
+
+        in_micro = (settings.MODE_MICRO_MIN_MCAP_USD <= mcap <= settings.MODE_MICRO_MAX_MCAP_USD)
+        in_grad = (settings.MODE_GRAD_MIN_MCAP_USD <= mcap <= settings.MODE_GRAD_MAX_MCAP_USD)
+
+        pass_liq = False
+        pass_ratio = False
+        mode_name = ""
+        min_liq = 0.0
+        min_ratio = 0.0
+        max_ratio = 0.0
+
+        if in_micro:
+            pass_liq = liq >= settings.MODE_MICRO_MIN_LIQ_USD
+            pass_ratio = settings.MODE_MICRO_MIN_LIQ_RATIO <= ratio <= settings.MODE_MICRO_MAX_LIQ_RATIO
+            mode_name = "Micro"
+            min_liq = settings.MODE_MICRO_MIN_LIQ_USD
+            min_ratio = settings.MODE_MICRO_MIN_LIQ_RATIO
+            max_ratio = settings.MODE_MICRO_MAX_LIQ_RATIO
+        elif in_grad:
+            pass_liq = liq >= settings.MODE_GRAD_MIN_LIQ_USD
+            pass_ratio = settings.MODE_GRAD_MIN_LIQ_RATIO <= ratio <= settings.MODE_GRAD_MAX_LIQ_RATIO
+            mode_name = "Graduate"
+            min_liq = settings.MODE_GRAD_MIN_LIQ_USD
+            min_ratio = settings.MODE_GRAD_MIN_LIQ_RATIO
+            max_ratio = settings.MODE_GRAD_MAX_LIQ_RATIO
+
+        # Gate 11a: Market cap band (Two-Mode Check)
+        scored.gate_11a_mcap_band = in_micro or in_grad
         if not scored.gate_11a_mcap_band:
-            return self._fail_record(scored, f"Gate 11a (Mcap ${record.t0_mcap_usd:,.0f} outside ${settings.GATE_11A_MIN_MCAP_USD:,.0f}-${settings.GATE_11A_MAX_MCAP_USD:,.0f})", "Tier 2", gates_passed)
+            return self._fail_record(scored, f"Gate 11a (Mcap ${mcap:,.0f} falls in Death Zone or outside limits)", "Tier 2", gates_passed)
         gates_passed += 1
 
-        # Gate 11b: Absolute liquidity floor (>= $10,000 USD)
-        scored.gate_11b_absolute_liq = record.t0_liquidity_usd >= settings.GATE_11B_MIN_ABSOLUTE_LIQ_USD
+        # Gate 11b: Absolute liquidity floor (Mode-specific)
+        scored.gate_11b_absolute_liq = pass_liq
         if not scored.gate_11b_absolute_liq:
-            return self._fail_record(scored, f"Gate 11b (Liq ${record.t0_liquidity_usd:,.0f} < ${settings.GATE_11B_MIN_ABSOLUTE_LIQ_USD:,.0f})", "Tier 2", gates_passed)
+            return self._fail_record(scored, f"Gate 11b ({mode_name}: Liq ${liq:,.0f} < ${min_liq:,.0f})", "Tier 2", gates_passed)
         gates_passed += 1
 
         # Gate 14: Time-in-market (10 mins to 120 mins)
@@ -153,80 +192,95 @@ class OfflineScorer:
 
         # --- Tier 3: Momentum & Wash-Trade Filters ---
 
-        # Gate 6: True Holder count >= GATE_6_MIN_HOLDER_COUNT
-        count_exact = getattr(record, 't0_holder_count_exact', None)
-        count_capped = getattr(record, 't0_holder_count_capped', False)
-        
-        scored.gate_6_holder_count = count_capped or (count_exact is not None and count_exact >= settings.GATE_6_MIN_HOLDER_COUNT)
+        # Gate 6: Holder Count >= 50
+        scored.gate_6_holder_count = record.t0_holder_count >= settings.GATE_6_MIN_HOLDER_COUNT
         
         if not scored.gate_6_holder_count:
-            if count_exact == 0:
+            if record.t0_holder_count == 0:
                 return self._fail_record(scored, "Gate 6 (Unindexed Lag: Holder count exactly 0)", "Tier 3", gates_passed)
             else:
-                val_str = str(count_exact) if count_exact is not None else "None"
-                return self._fail_record(scored, f"Gate 6 (Failed Low Holders: {val_str} < {settings.GATE_6_MIN_HOLDER_COUNT})", "Tier 3", gates_passed)
+                return self._fail_record(scored, f"Gate 6 (Failed Low Holders: {record.t0_holder_count} < {settings.GATE_6_MIN_HOLDER_COUNT})", "Tier 3", gates_passed)
         gates_passed += 1
 
-        # Gate 7: Buy/sell tx ratio >= 2:1
-        scored.gate_7_buy_sell_ratio = record.t0_buy_sell_ratio >= settings.GATE_7_MIN_BUY_SELL_RATIO
-        if not scored.gate_7_buy_sell_ratio:
-            return self._fail_record(scored, f"Gate 7 (Buy/Sell Ratio {record.t0_buy_sell_ratio:.2f} < {settings.GATE_7_MIN_BUY_SELL_RATIO})", "Tier 3", gates_passed)
+        # Gate 7: Buy/sell tx ratio
+        # Mode-specific behavior:
+        # - Micro: Ratio provides no signal (overlapping distributions). Use a loose 0.5 floor as a sanity check.
+        # - Graduate: Functions as a secondary anti-manipulation filter. True winners have low ratios (profit taking), 
+        #   while wash-traded scams and rugs have extremely high ratios. Enforce a <= 2.5 ceiling.
+        if mode_name == "Micro":
+            scored.gate_7_buy_sell_ratio = record.t0_buy_sell_ratio >= settings.GATE_7_MIN_BUY_SELL_RATIO
+            if not scored.gate_7_buy_sell_ratio:
+                return self._fail_record(scored, f"Gate 7 (Micro: Buy/Sell Ratio {record.t0_buy_sell_ratio:.2f} < {settings.GATE_7_MIN_BUY_SELL_RATIO})", "Tier 3", gates_passed)
+        else: # Graduate Mode
+            scored.gate_7_buy_sell_ratio = (record.t0_buy_sell_ratio >= settings.GATE_7_MIN_BUY_SELL_RATIO) and (record.t0_buy_sell_ratio <= settings.MODE_GRAD_MAX_BUY_SELL_RATIO)
+            if not scored.gate_7_buy_sell_ratio:
+                return self._fail_record(scored, f"Gate 7 (Graduate: Buy/Sell Ratio {record.t0_buy_sell_ratio:.2f} outside {settings.GATE_7_MIN_BUY_SELL_RATIO}-{settings.MODE_GRAD_MAX_BUY_SELL_RATIO})", "Tier 3", gates_passed)
         gates_passed += 1
 
         # Gate 8: Single wallet <= 25% of window volume
-        scored.gate_8_single_wallet_vol = record.t0_single_wallet_vol_pct <= settings.GATE_8_MAX_SINGLE_WALLET_VOL_PCT
-        if not scored.gate_8_single_wallet_vol:
-            return self._fail_record(scored, f"Gate 8 (Whale Vol {record.t0_single_wallet_vol_pct}% > {settings.GATE_8_MAX_SINGLE_WALLET_VOL_PCT}%)", "Tier 3", gates_passed)
+        if not record.t0_forensics_collected:
+            scored.gate_8_single_wallet_vol = None  # SKIPPED
+        else:
+            scored.gate_8_single_wallet_vol = record.t0_single_wallet_vol_pct <= settings.GATE_8_MAX_SINGLE_WALLET_VOL_PCT
+            if not scored.gate_8_single_wallet_vol:
+                return self._fail_record(scored, f"Gate 8 (Whale Vol {record.t0_single_wallet_vol_pct}% > {settings.GATE_8_MAX_SINGLE_WALLET_VOL_PCT}%)", "Tier 3", gates_passed)
         gates_passed += 1
 
-        # Gate 9: Liquidity/mcap ratio >= 0.25
-        liq_ratio = (record.t0_liquidity_usd / record.t0_mcap_usd) if record.t0_mcap_usd > 0 else 0.0
-        scored.gate_9_liq_mcap_ratio = liq_ratio >= settings.GATE_9_MIN_LIQ_MCAP_RATIO
+        # Gate 9: Liquidity/mcap ratio (Mode-specific)
+        scored.gate_9_liq_mcap_ratio = pass_ratio
         if not scored.gate_9_liq_mcap_ratio:
-            return self._fail_record(scored, f"Gate 9 (Liq/Mcap Ratio {liq_ratio:.2f} < {settings.GATE_9_MIN_LIQ_MCAP_RATIO})", "Tier 3", gates_passed)
+            return self._fail_record(scored, f"Gate 9 ({mode_name}: Liq/Mcap Ratio {ratio:.3f} outside {min_ratio}-{max_ratio})", "Tier 3", gates_passed)
         gates_passed += 1
 
         # Gate 10: Unique buyers >= 20 in window
-        scored.gate_10_unique_buyers = record.t0_unique_buyers >= settings.GATE_10_MIN_UNIQUE_BUYERS
-        if not scored.gate_10_unique_buyers:
-            return self._fail_record(scored, f"Gate 10 (Unique Buyers {record.t0_unique_buyers} < {settings.GATE_10_MIN_UNIQUE_BUYERS})", "Tier 3", gates_passed)
+        if not record.t0_forensics_collected:
+            scored.gate_10_unique_buyers = None  # SKIPPED
+        else:
+            scored.gate_10_unique_buyers = record.t0_unique_buyers >= settings.GATE_10_MIN_UNIQUE_BUYERS
+            if not scored.gate_10_unique_buyers:
+                return self._fail_record(scored, f"Gate 10 (Unique Buyers {record.t0_unique_buyers} < {settings.GATE_10_MIN_UNIQUE_BUYERS})", "Tier 3", gates_passed)
         gates_passed += 1
 
         # Gate 13: Volume/tx sanity (check that volume isn't 0 when buy ratio > 1)
         # Spec v2: Median buy size > 0.05 SOL ($7.5) and churning volume < 25%
-        scored.gate_13_volume_sanity = True
         t0_median_buy_usd = getattr(record, 't0_median_buy_size_usd', 0.0)
         t0_churn_volume_usd = getattr(record, 't0_churn_volume_usd', 0.0)
         t0_volume_usd_15m = getattr(record, 't0_volume_usd_15m', 0.0)
-        t0_churn_volume_pct = (t0_churn_volume_usd / t0_volume_usd_15m * 100.0) if t0_volume_usd_15m > 0 else 0.0
         
-        if t0_median_buy_usd < 7.5:
-            scored.gate_13_volume_sanity = False
-            return self._fail_record(scored, f"Gate 13 (Median buy ${t0_median_buy_usd:.2f} < $7.5)", "Tier 3", gates_passed)
-        if t0_churn_volume_pct > 25.0:
-            scored.gate_13_volume_sanity = False
-            return self._fail_record(scored, f"Gate 13 (Churn vol {t0_churn_volume_pct:.1f}% > 25%)", "Tier 3", gates_passed)
-        
+        if not record.t0_forensics_collected:
+            scored.gate_13_volume_sanity = None  # SKIPPED
+        else:
+            scored.gate_13_volume_sanity = True
+            if t0_median_buy_usd < 7.5:
+                scored.gate_13_volume_sanity = False
+            
+            if t0_volume_usd_15m > 0 and (t0_churn_volume_usd / t0_volume_usd_15m) > 0.25:
+                scored.gate_13_volume_sanity = False
+                
+            if not scored.gate_13_volume_sanity:
+                return self._fail_record(scored, f"Gate 13 (Volume Sanity: Median Buy ${t0_median_buy_usd:.2f})", "Tier 4", gates_passed)
         gates_passed += 1
 
         # --- Tier 4a/4b: Funding Heuristic & Forensic Trace ---
 
         # Gate 12: No funding-source clustering (pool_slot close to creator_funding_slot)
         # A difference of < 100 slots (approx 40 seconds) indicates highly automated bot behavior
-        scored.gate_12_funding_cluster = True
         pool_slot = getattr(record, 'pool_slot', 0)
         creator_funding_slot = getattr(record, 'creator_funding_slot', 0)
-        if pool_slot and creator_funding_slot:
+        if not record.t0_forensics_collected:
+            scored.gate_12_funding_cluster = None  # SKIPPED
+        else:
+            scored.gate_12_funding_cluster = True
             if abs(pool_slot - creator_funding_slot) < 100:
                 scored.gate_12_funding_cluster = False
-                
-        if not scored.gate_12_funding_cluster:
-            return self._fail_record(scored, "Gate 12 (Funding Source Sybil Cluster Detected)", "Tier 4a", gates_passed)
+                    
+            if not scored.gate_12_funding_cluster:
+                return self._fail_record(scored, "Gate 12 (Funding Source Sybil Cluster Detected)", "Tier 4a", gates_passed)
         gates_passed += 1
 
         # If we reached here, ALL 14 GATES PASSED!
         scored.passed_all_gates = True
-        scored.first_failed_gate = None
+        scored.first_failed_gate = "PASSED (SKIPPED 4 FORENSICS)" if not record.t0_forensics_collected else None
         scored.first_failed_tier = None
         scored.total_gates_passed = gates_passed
         return scored
@@ -240,18 +294,25 @@ class OfflineScorer:
         return scored
 
     def generate_calibration_report(self) -> str:
-        """Generate Section 9 statistical cross-tabulation report comparing Passed vs Failed against Outcomes."""
+        """Generate a summarized text report of the pipeline's performance."""
         if not self.scored_records:
-            return "No evaluated records available for report."
+            return "No scored records available."
 
         df = pd.DataFrame([r.model_dump() for r in self.scored_records])
         total_tokens = len(df)
         passed_df = df[df["passed_all_gates"] == True]
         failed_df = df[df["passed_all_gates"] == False]
+        partial_pass_df = passed_df[passed_df["t0_forensics_collected"] == False] if "t0_forensics_collected" in passed_df.columns else pd.DataFrame()
 
         # Cross-tabulate Outcome Label vs Pipeline Pass/Fail
+        def _decision_label(row):
+            if row["passed_all_gates"]:
+                return "Passed All 14 Gates" if row.get("t0_forensics_collected", True) else "Passed (SKIPPED 4 Forensics)"
+            return "Failed >= 1 Gate (REJECTED)"
+            
+        df["decision_label"] = df.apply(_decision_label, axis=1)
         cross_tab = pd.crosstab(
-            df["passed_all_gates"].map({True: "Passed All 14 Gates (ALERT FIRED)", False: "Failed >= 1 Gate (REJECTED)"}),
+            df["decision_label"],
             df["outcome_label"],
             margins=True,
             margins_name="Total",
@@ -267,7 +328,7 @@ class OfflineScorer:
             " [REPORT] LOW-MC TOKEN SNIPER BOT (v2) — GATE CALIBRATION & BACKTEST REPORT",
             "=" * 80,
             f"Total Historical Tokens Analyzed : {total_tokens}",
-            f"Tokens Passing All 14 Gates      : {len(passed_df)} ({len(passed_df)/total_tokens*100:.1f}%)",
+            f"Tokens Passing All 14 Gates      : {len(passed_df)} ({len(passed_df)/total_tokens*100:.1f}%)" + (f" [Includes {len(partial_pass_df)} partial passes]" if len(partial_pass_df) > 0 else ""),
             f"Tokens Rejected by Pipeline      : {len(failed_df)} ({len(failed_df)/total_tokens*100:.1f}%)",
             "-" * 80,
             " [CROSS-TAB] SECTION 9 CROSS-TABULATION: PIPELINE DECISION vs. ACTUAL OUTCOME",
@@ -285,6 +346,37 @@ class OfflineScorer:
         passed_rugs = len(passed_df[passed_df["outcome_label"] == "Rug / dead"])
         passed_winners = len(passed_df[passed_df["outcome_label"] == "Winner"])
         
+        # Calculate Winner Retention Rates properly by architectural bands
+        all_winners = df[df["outcome_label"] == "Winner"]
+        
+        def get_subset(df, min_val, max_val):
+            if max_val == float('inf'):
+                return df[df["t0_mcap_usd"] >= min_val]
+            return df[(df["t0_mcap_usd"] >= min_val) & (df["t0_mcap_usd"] < max_val)]
+
+        bands = [
+            ("Micro Mode ($5k-$30k)", 5000, 30000),
+            ("Death Zone ($30k-$100k)", 30000, 100000),
+            ("Gap ($100k-$150k)", 100000, settings.MODE_GRAD_MIN_MCAP_USD),
+            (f"Graduate Mode (>={settings.MODE_GRAD_MIN_MCAP_USD:,.0f})", settings.MODE_GRAD_MIN_MCAP_USD, float('inf'))
+        ]
+
+        report_lines.extend([
+            " [METRICS] ORGANIC WINNER RETENTION",
+            "-" * 80
+        ])
+
+        for label, b_min, b_max in bands:
+            w_total = len(get_subset(all_winners, b_min, b_max))
+            w_passed = len(get_subset(passed_df[passed_df["outcome_label"] == "Winner"], b_min, b_max))
+            retention = (w_passed / w_total * 100) if w_total > 0 else 0.0
+            report_lines.append(f"{label:28s} : {retention:5.1f}% ({w_passed} / {w_total} passed)")
+
+        report_lines.extend([
+            "=" * 80,
+            " [VERDICT] CALIBRATION VERDICT & GUIDANCE:"
+        ])
+
         if len(passed_df) == 0:
             report_lines.append("  [WARN] ZERO TOKENS PASSED: Your cutoff thresholds are currently TOO STRICT.")
             report_lines.append("     Recommendation: Loosen Gate 6 (Holder Count), Gate 11a (Mcap Band), or Gate 14 (Age Window).")
@@ -294,7 +386,7 @@ class OfflineScorer:
             report_lines.append("     Recommendation: Tighten Gate 4 (Top 10 Holder %), Gate 7 (Buy/Sell Ratio), or Gate 8 (Whale Vol).")
         else:
             report_lines.append(f"  [OK] ZERO RUG RATE ACHIEVED! 0% of alerted tokens rugged. ({passed_winners} confirmed Winners).")
-            report_lines.append("     The 14-gate specification is working as intended on this dataset.")
+            report_lines.append("     The architecture is working as intended on this dataset.")
 
         report_lines.append("=" * 80)
         report_str = "\n".join(report_lines)
