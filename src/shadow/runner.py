@@ -273,6 +273,27 @@ class ShadowRunner:
                 volume_dict = attributes.get("volume_usd", {})
                 vol_15m = float(volume_dict.get("m5", 0.0) or volume_dict.get("h1", 0.0) or 0.0)
                 
+                # Guardrail: Check for impossible 0/0 values indicating a broken fetch
+                if mcap_usd == 0 and liquidity_usd == 0:
+                    logger.warning(f"Guardrail tripped for {data.get('symbol')} ({pool_address}): GT returned $0 MCap and $0 Liq. Likely API bug.")
+                    snapshot = {
+                        "pool_address": pool_address,
+                        "token_address": data.get("token_address"),
+                        "symbol": data.get("symbol"),
+                        "raw_symbol": data.get("symbol", "").split(" (")[0],
+                        "network": self.network,
+                        "status": "DROPPED",
+                        "drop_reason": "Data fetch likely broken ($0 mcap/liq)",
+                        "outcome_label": "Failed to fetch",
+                        "outcome_reason": "GeckoTerminal returned impossible $0 values.",
+                        "tfinal_timestamp": now,
+                    }
+                    self.resolved_tokens.append(snapshot)
+                    self._save_resolved_tokens()
+                    del self.waiting_t0_tokens[pool_address]
+                    self._save_waiting_t0_tokens()
+                    continue
+
                 # Check bounds again
                 if mcap_usd < 5000.0 or mcap_usd > 500000.0 or liquidity_usd < 1000.0:
                     logger.debug(f"Skipping matured pool {data.get('symbol')} (Out of bounds: MCap ${mcap_usd:,.0f}, Liq ${liquidity_usd:,.0f})")
