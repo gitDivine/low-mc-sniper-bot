@@ -265,7 +265,7 @@ class ShadowRunner:
                     self._save_waiting_t0_tokens()
                     continue
                 
-                attributes = pool_data.get("data", {}).get("attributes", {})
+                attributes = pool_data.get("attributes", {})
                 price_usd = float(attributes.get("base_token_price_usd") or 0.0)
                 liquidity_usd = float(attributes.get("reserve_in_usd") or 0.0)
                 mcap_usd = float(attributes.get("fdv_usd") or 0.0)
