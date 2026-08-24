@@ -459,6 +459,7 @@ class ShadowRunner:
             "pool_slot": 0,                      # Left unpopulated for Gate 12
             "creator_funding_slot": 0,           # Left unpopulated for Gate 12
             "pool_time": 0,                   
+            "t0_slot_data_collected": False,     # Explicit flag to avoid 0-sentinel ambiguity
             "t0_forensics_collected": forensics.get("t0_forensics_collected", False) if forensics else False,
             "t0_ratio_window": "",
             "liq_mcap_ratio": liq_mcap_ratio,

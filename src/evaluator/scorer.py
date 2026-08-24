@@ -268,8 +268,8 @@ class OfflineScorer:
         pool_slot = getattr(record, 'pool_slot', 0)
         creator_funding_slot = getattr(record, 'creator_funding_slot', 0)
         
-        # We only evaluate Gate 12 if slot data was actually collected (> 0)
-        if pool_slot == 0 and creator_funding_slot == 0:
+        # We only evaluate Gate 12 if slot data was actually collected
+        if not getattr(record, 't0_slot_data_collected', False):
             scored.gate_12_funding_cluster = None  # SKIPPED
         else:
             scored.gate_12_funding_cluster = True
@@ -282,7 +282,18 @@ class OfflineScorer:
 
         # If we reached here, ALL 14 GATES PASSED!
         scored.passed_all_gates = True
-        scored.first_failed_gate = "PASSED (SKIPPED 4 FORENSICS)" if not record.t0_forensics_collected else None
+        
+        skipped_str = []
+        if not record.t0_forensics_collected:
+            skipped_str.append("G8/10/13")
+        if not getattr(record, 't0_slot_data_collected', False):
+            skipped_str.append("G12")
+            
+        if skipped_str:
+            scored.first_failed_gate = f"PASSED (SKIPPED {','.join(skipped_str)})"
+        else:
+            scored.first_failed_gate = None
+            
         scored.first_failed_tier = None
         scored.total_gates_passed = gates_passed
         return scored
@@ -304,12 +315,23 @@ class OfflineScorer:
         total_tokens = len(df)
         passed_df = df[df["passed_all_gates"] == True]
         failed_df = df[df["passed_all_gates"] == False]
-        partial_pass_df = passed_df[passed_df["t0_forensics_collected"] == False] if "t0_forensics_collected" in passed_df.columns else pd.DataFrame()
+        partial_pass_df = passed_df[
+            (passed_df.get("t0_forensics_collected", True) == False) | 
+            (passed_df.get("t0_slot_data_collected", True) == False)
+        ]
 
         # Cross-tabulate Outcome Label vs Pipeline Pass/Fail
         def _decision_label(row):
             if row["passed_all_gates"]:
-                return "Passed All 14 Gates" if row.get("t0_forensics_collected", True) else "Passed (SKIPPED 4 Forensics)"
+                skipped_str = []
+                if not row.get("t0_forensics_collected", True):
+                    skipped_str.append("G8/10/13")
+                if not row.get("t0_slot_data_collected", True):
+                    skipped_str.append("G12")
+                
+                if skipped_str:
+                    return f"Passed (SKIPPED {','.join(skipped_str)})"
+                return "Passed All 14 Gates"
             return "Failed >= 1 Gate (REJECTED)"
             
         df["decision_label"] = df.apply(_decision_label, axis=1)
