@@ -530,5 +530,69 @@ class AsyncAPIClient:
             
         return data["result"]["total"]
 
+    async def fetch_birdeye_swaps(self, token_address: str, launch_timestamp: int, max_pages: int = 10) -> list[dict]:
+        """
+        Fetch early swap history from Birdeye API to reconstruct forensics.
+        Requires settings.BIRDEYE_API_KEY to be set.
+        Paginates backwards (newest to oldest) until blockUnixTime < launch_timestamp.
+        Returns a list of trade dictionaries in descending order.
+        """
+        if not settings.BIRDEYE_API_KEY:
+            logger.warning("No BIRDEYE_API_KEY found in settings. Skipping Birdeye forensics fetch.")
+            return []
+            
+        all_trades = []
+        offset = 0
+        limit = 50
+        
+        headers = {
+            "X-API-KEY": settings.BIRDEYE_API_KEY,
+            "accept": "application/json",
+            "x-chain": "solana"
+        }
+        
+        for _ in range(max_pages):
+            url = f"{settings.BIRDEYE_BASE_URL}/defi/txs/token"
+            params = {
+                "address": token_address,
+                "offset": offset,
+                "limit": limit,
+                "tx_type": "swap"
+            }
+            try:
+                data = await self._get(url, params=params, custom_headers=headers)
+                if not data or not isinstance(data, dict):
+                    break
+                    
+                if not data.get("success"):
+                    break
+                    
+                trades = data.get("data", {}).get("items", [])
+                if not trades:
+                    break
+                    
+                # Filter trades that happened before launch (if API returns any)
+                valid_trades = []
+                reached_beginning = False
+                for t in trades:
+                    if t.get("blockUnixTime", 0) < launch_timestamp:
+                        reached_beginning = True
+                        break
+                    valid_trades.append(t)
+                    
+                all_trades.extend(valid_trades)
+                
+                # If we got fewer than limit, or we hit the launch time, we're at the end
+                if len(trades) < limit or reached_beginning:
+                    break
+                    
+                offset += limit
+                
+            except Exception as e:
+                logger.warning(f"Error fetching Birdeye swaps for {token_address}: {e}")
+                break
+                
+        return all_trades
+
 
 api_client = AsyncAPIClient()

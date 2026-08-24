@@ -315,6 +315,71 @@ class ShadowRunner:
                     self._save_waiting_t0_tokens()
                     continue
 
+                # Birdeye Forensics Fetch (First 15m)
+                launch_timestamp = int(pool_dt.timestamp()) if 'pool_dt' in locals() else int(now - 900)
+                birdeye_swaps = await api_client.fetch_birdeye_swaps(
+                    token_address=data.get("token_address"),
+                    launch_timestamp=launch_timestamp,
+                    max_pages=10
+                )
+                
+                forensics = {
+                    "t0_unique_buyers": 0,
+                    "t0_single_wallet_vol_pct": 0.0,
+                    "t0_median_buy_size_usd": 0.0,
+                    "t0_forensics_collected": False
+                }
+                
+                if birdeye_swaps:
+                    buyer_wallets = set()
+                    wallet_volumes = {}
+                    buy_sizes_usd = []
+                    total_volume_usd = 0.0
+                    
+                    for swap in birdeye_swaps:
+                        owner = swap.get("owner")
+                        side = swap.get("side")
+                        if not owner or not side:
+                            continue
+                            
+                        # Extract USD value (using the from price as a proxy)
+                        from_data = swap.get("from", {})
+                        price = from_data.get("price", 0.0)
+                        ui_amount = from_data.get("uiAmount", 0.0)
+                        if price is None: price = 0.0
+                        if ui_amount is None: ui_amount = 0.0
+                        usd_value = float(price * ui_amount)
+                        
+                        total_volume_usd += usd_value
+                        wallet_volumes[owner] = wallet_volumes.get(owner, 0.0) + usd_value
+                        
+                        if side == "buy":
+                            buyer_wallets.add(owner)
+                            buy_sizes_usd.append(usd_value)
+                            
+                    t0_unique_buyers = len(buyer_wallets)
+                    max_wallet_vol = max(wallet_volumes.values()) if wallet_volumes else 0.0
+                    t0_single_wallet_vol_pct = (max_wallet_vol / total_volume_usd * 100.0) if total_volume_usd > 0 else 0.0
+                    
+                    t0_median_buy_size_usd = 0.0
+                    if buy_sizes_usd:
+                        buy_sizes_usd.sort()
+                        n = len(buy_sizes_usd)
+                        if n % 2 == 1:
+                            t0_median_buy_size_usd = buy_sizes_usd[n // 2]
+                        else:
+                            t0_median_buy_size_usd = (buy_sizes_usd[n // 2 - 1] + buy_sizes_usd[n // 2]) / 2.0
+                            
+                    forensics = {
+                        "t0_unique_buyers": t0_unique_buyers,
+                        "t0_single_wallet_vol_pct": round(t0_single_wallet_vol_pct, 2),
+                        "t0_median_buy_size_usd": round(t0_median_buy_size_usd, 2),
+                        "t0_forensics_collected": True
+                    }
+                    logger.info(f"Birdeye Forensics collected for {data.get('symbol')}: {t0_unique_buyers} buyers, max wallet {t0_single_wallet_vol_pct:.1f}%")
+                else:
+                    logger.warning(f"No Birdeye trades found for {data.get('symbol')} or fetch failed. Forensics marked False.")
+
                 snapshot = await self._capture_t0_snapshot(
                     pool_address=pool_address,
                     token_address=data.get("token_address"),
@@ -325,6 +390,7 @@ class ShadowRunner:
                     vol_15m=vol_15m,
                     age_hours=age_seconds / 3600.0,
                     has_rtl_scam=data.get("has_rtl_scam", False),
+                    forensics=forensics,
                 )
 
                 if snapshot.get("status") == "DROPPED":
@@ -356,6 +422,7 @@ class ShadowRunner:
         vol_15m: float,
         age_hours: float,
         has_rtl_scam: bool = False,
+        forensics: dict = None,
     ) -> dict[str, Any]:
         """Runs immediate RPC calls for Gates 1, 4, 5, 9, 11a, 11b at launch moment (T0)."""
         liq_mcap_ratio = round(liquidity_usd / mcap_usd, 4) if mcap_usd > 0 else 0.0
@@ -386,11 +453,13 @@ class ShadowRunner:
             "t0_holder_count_floor": None,
             "t0_holder_count_capped": False,
             "t0_avg_tx_size": 0.0,
-            "t0_single_wallet_vol_pct": 0.0,  # Forensic field to be populated
-            "pool_slot": 0,                   # Forensic field to be populated
-            "creator_funding_slot": 0,        # Forensic field to be populated
-            "pool_time": 0,                   # Forensic field to be populated
-            "t0_forensics_collected": False,  # Flag to indicate if forensic data was collected
+            "t0_single_wallet_vol_pct": forensics.get("t0_single_wallet_vol_pct", 0.0) if forensics else 0.0,
+            "t0_unique_buyers": forensics.get("t0_unique_buyers", 0) if forensics else 0,
+            "t0_median_buy_size_usd": forensics.get("t0_median_buy_size_usd", 0.0) if forensics else 0.0,
+            "pool_slot": 0,                      # Left unpopulated for Gate 12
+            "creator_funding_slot": 0,           # Left unpopulated for Gate 12
+            "pool_time": 0,                   
+            "t0_forensics_collected": forensics.get("t0_forensics_collected", False) if forensics else False,
             "t0_ratio_window": "",
             "liq_mcap_ratio": liq_mcap_ratio,
             "status": "PENDING",

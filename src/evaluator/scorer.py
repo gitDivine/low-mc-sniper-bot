@@ -267,7 +267,9 @@ class OfflineScorer:
         # A difference of < 100 slots (approx 40 seconds) indicates highly automated bot behavior
         pool_slot = getattr(record, 'pool_slot', 0)
         creator_funding_slot = getattr(record, 'creator_funding_slot', 0)
-        if not record.t0_forensics_collected:
+        
+        # We only evaluate Gate 12 if slot data was actually collected (> 0)
+        if pool_slot == 0 and creator_funding_slot == 0:
             scored.gate_12_funding_cluster = None  # SKIPPED
         else:
             scored.gate_12_funding_cluster = True
