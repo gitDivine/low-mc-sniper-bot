@@ -31,6 +31,7 @@ The system operates as a two-script architecture with a 4-tier execution pipelin
 ---
 
 ## Change Log
+- **2026-08-26** - **IMPORTANT** - Fully implemented Gate 12 (Funding Source Sybil Cluster check) with persistent 48h rolling history, CEX wallet bypass, and a strict 2-page pagination fail-safe. Validated that the fail-safe safely skips heavily active >48h-old historical wallets to prevent hanging. Validated that the clustering logic correctly evaluates and passes non-clustered wallets when the funding source *is* successfully retrieved. Note: Since historical testing relies on 48h-old data, the success rate of retrieving the funder (and thus the skip rate of Gate 12) is artificially depressed in backtests. Live T0 data (15 minutes old) is expected to have a significantly lower skip-rate, but this must be explicitly measured in the next batch.
 - **2026-08-17** - **CRITICAL** - Implemented the "Two-Mode Architecture" (Micro: $5k-$30k, Graduate: >=$150k) to address mode-dependent blind spots. Calibrated and empirically validated Gates 7, 9, and 11a/11b against historical datasets, observing inverted token behavior across scale. Conducted an interim *logical* pass for Gates 8, 12, and 14; these are treated as structurally sound placeholders but explicitly **not** empirically validated yet, pending live data collection.
 - **2026-08-14** - **IMPORTANT** - Updated Gate 6 threshold to `t0_holder_count >= 50` based on Batch 4 48-hour data analysis (Option A). Introduced explicit tracking for "Unindexed Lag" tokens (where DAS returns exactly 0 holders) in `src/evaluator/scorer.py` to separate timing artifacts from genuine low-holder rejections. This enables future retry mechanisms to recover these tokens (which represent ~19% of winners) without diluting the strict cutoff logic.
 
@@ -41,6 +42,7 @@ The system operates as a two-script architecture with a 4-tier execution pipelin
 - [x] Implement historical pair harvester (`src/data_puller/harvester.py`) for Solana with T0 snapshot capture and T-final labeling.
 - [x] Build Script 2 (`src/evaluator/scorer.py`) for offline 14-gate evaluation and cutoff calibration.
 - [x] Build Shadow Runner (`src/shadow/runner.py` & `run_shadow.py`) for real-time live discovery and T0 gate snapshotting.
+- [ ] **IMMEDIATE:** Confirm Gate 12's live skip-rate is actually low, as predicted. Measure what fraction of tokens in the next live batch get a real Gate 12 evaluation (pass/fail) versus a pagination-limit skip once the bot is running on genuinely fresh T0 snapshots. Do this *before* relying on its calibration against the 33 Hyper-Clean rugs.
 - [ ] Run Shadow Runner on VPS for 24-48h to collect live T0 calibration dataset with full forensic fields (unique buyers, funding slots).
 - [ ] Run percentile-by-mode breakdown on Gates 8, 10, 12, 13, and 14 immediately once live data collection provides the forensic fields. Hunt specifically for mode-dependent inversion.
 - [ ] Auto-calibrate Gate 4 (Top 10 %), Gate 5 (Dev %), and Gate 9 (Liq/MCap) using resolved shadow dataset.
