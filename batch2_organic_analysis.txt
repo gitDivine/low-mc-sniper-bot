@@ -1,0 +1,23 @@
+=== BATCH 2: CLEANED ORGANICS ANALYSIS ===
+Total Tokens: 870
+Organic Tokens (Dev<=20%, Top10<=50%): 242
+Obvious Scams (Dev>20% or Top10>50%): 628
+
+--- OUTCOMES FOR ORGANICS ---
+  Rug / dead: 124 (51.2%)
+  Flat / mediocre: 111 (45.9%)
+  Winner: 7 (2.9%)
+
+--- ORGANIC WINNERS (7) DETAILS ---
+TOADHOUSE (8sK9B...): ROI 2.74x, Top10 12.58%, Dev 3.21%, Liq/MCap 0.067, T0 Liq 19322.6776
+LDOG (JCvej...): ROI 3.83x, Top10 12.9%, Dev 3.43%, Liq/MCap 0.069, T0 Liq 16309.841
+ThinkVoice (5F2qY...): ROI 2.06x, Top10 46.28%, Dev 9.44%, Liq/MCap 1.037, T0 Liq 8139.0894
+eˣ (7NrAb...): ROI 2.52x, Top10 20.32%, Dev 3.46%, Liq/MCap 0.428, T0 Liq 4546.3373
+Pintail (4ABka...): ROI 4.20x, Top10 23.5%, Dev 3.47%, Liq/MCap 0.581, T0 Liq 4013.143
+SAOF (B6aRQ...): ROI 5.52x, Top10 12.76%, Dev 3.55%, Liq/MCap 0.099, T0 Liq 19316.28487
+Pintail (3q1h2...): ROI 4.61x, Top10 12.7%, Dev 3.36%, Liq/MCap 0.070, T0 Liq 20011.2579
+
+--- ORGANIC WINNERS STATS ---
+Top 10 Holder %  | Min: 12.58%, Max: 46.28%, Mean: 20.15%
+Dev Wallet %     | Min: 3.21%, Max: 9.44%, Mean: 4.27%
+Liq/MCap Ratio   | Min: 0.067, Max: 1.037, Mean: 0.336

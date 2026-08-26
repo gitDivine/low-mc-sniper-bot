@@ -594,5 +594,94 @@ class AsyncAPIClient:
                 
         return all_trades
 
+    async def fetch_creator_funding_info(self, token_mint: str) -> tuple[Optional[int], Optional[str]]:
+        """
+        Fetches the funding slot and funder wallet for a token's creator.
+        Uses a hard limit of max 2 pages to avoid hanging on heavily used wallets.
+        Returns (funding_slot, funder_wallet_address).
+        """
+        helius_api_key = getattr(settings, 'HELIUS_API_KEY', '0182f0e1-1ebc-4396-9cc3-9e2443b1e9c6')
+        helius_rpc = f"https://mainnet.helius-rpc.com/?api-key={helius_api_key}"
+        
+        async def _fetch_oldest_sig(address: str, max_pages: int = 2) -> Optional[str]:
+            await self.rate_limiter.acquire()
+            client = await self.get_client()
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [address, {"limit": 1000}]
+            }
+            last_sig = None
+            for _ in range(max_pages):
+                if last_sig:
+                    payload["params"][1]["before"] = last_sig
+                try:
+                    res = await client.post(helius_rpc, json=payload, headers={"Content-Type": "application/json"})
+                    if res.status_code != 200:
+                        break
+                    data = res.json().get("result", [])
+                    if not data:
+                        break
+                    last_sig = data[-1]["signature"]
+                    if len(data) < 1000:
+                        # Reached the genesis
+                        return last_sig
+                except Exception:
+                    break
+            # If we hit max pages without naturally breaking (<1000), we abort
+            # to avoid guessing on a heavily used wallet.
+            return None
+
+        # 1. Get oldest sig for token mint (creator's tx)
+        creator_sig = await _fetch_oldest_sig(token_mint, max_pages=2)
+        if not creator_sig:
+            return None, None
+
+        # 2. Fetch the transaction to find feePayer
+        await self.rate_limiter.acquire()
+        client = await self.get_client()
+        tx_url = f"https://api.helius.xyz/v0/transactions/?api-key={helius_api_key}"
+        try:
+            res = await client.post(tx_url, json={"transactions": [creator_sig]})
+            if res.status_code == 200:
+                tx_data = res.json()
+                if tx_data and isinstance(tx_data, list) and len(tx_data) > 0:
+                    fee_payer = tx_data[0].get("feePayer")
+                    if not fee_payer:
+                        return None, None
+                else:
+                    return None, None
+            else:
+                return None, None
+        except Exception:
+            return None, None
+
+        # 3. Get oldest sig for feePayer (funder's tx)
+        funder_sig = await _fetch_oldest_sig(fee_payer, max_pages=2)
+        if not funder_sig:
+            return None, None
+
+        # 4. Fetch funder transaction to get actual funding wallet and slot
+        await self.rate_limiter.acquire()
+        try:
+            res = await client.post(tx_url, json={"transactions": [funder_sig]})
+            if res.status_code == 200:
+                tx_data = res.json()
+                if tx_data and isinstance(tx_data, list) and len(tx_data) > 0:
+                    ftx = tx_data[0]
+                    slot = ftx.get("slot")
+                    funder = "UNKNOWN"
+                    for nt in ftx.get("nativeTransfers", []):
+                        if nt.get("toUserAccount") == fee_payer:
+                            funder = nt.get("fromUserAccount")
+                            break
+                    if funder != "UNKNOWN":
+                        return slot, funder
+        except Exception:
+            pass
+
+        return None, None
+
 
 api_client = AsyncAPIClient()

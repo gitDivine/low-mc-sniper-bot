@@ -1,6 +1,7 @@
 """Offline 14-gate evaluator and statistical cross-tabulation calibrator for Low-MC Token Sniper Bot."""
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Optional
 import pandas as pd
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from config.settings import settings
 from src.data_puller.harvester import TokenSnapshotRecord
+from src.utils.constants import KNOWN_CEX_WALLETS
 
 logger = logging.getLogger(__name__)
 
@@ -263,21 +265,57 @@ class OfflineScorer:
 
         # --- Tier 4a/4b: Funding Heuristic & Forensic Trace ---
 
-        # Gate 12: No funding-source clustering (pool_slot close to creator_funding_slot)
-        # A difference of < 100 slots (approx 40 seconds) indicates highly automated bot behavior
-        pool_slot = getattr(record, 'pool_slot', 0)
-        creator_funding_slot = getattr(record, 'creator_funding_slot', 0)
+        # Gate 12: No funding-source clustering
+        # Excludes KNOWN_CEX_WALLETS. Maintains a 48h rolling history in data/funder_history.json
+        funder_wallet = getattr(record, 't0_funder_wallet', "")
         
-        # We only evaluate Gate 12 if slot data was actually collected
-        if not getattr(record, 't0_slot_data_collected', False):
+        # We only evaluate Gate 12 if slot data was actually collected and funder is known
+        if not getattr(record, 't0_slot_data_collected', False) or not funder_wallet or funder_wallet == "UNKNOWN":
             scored.gate_12_funding_cluster = None  # SKIPPED
+        elif funder_wallet in KNOWN_CEX_WALLETS:
+            scored.gate_12_funding_cluster = True
         else:
             scored.gate_12_funding_cluster = True
-            if abs(pool_slot - creator_funding_slot) < 100:
+            history_file = Path("data/funder_history.json")
+            history_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            history = {}
+            if history_file.exists():
+                try:
+                    with open(history_file, "r") as f:
+                        history = json.load(f)
+                except Exception:
+                    pass
+            
+            current_time = time.time()
+            
+            # Prune > 48h old entries
+            forty_eight_hours_sec = 48 * 3600
+            pruned_history = {}
+            for w, ts_list in history.items():
+                recent_ts = [ts for ts in ts_list if current_time - ts < forty_eight_hours_sec]
+                if recent_ts:
+                    pruned_history[w] = recent_ts
+            history = pruned_history
+            
+            # Check cluster
+            if funder_wallet in history and len(history[funder_wallet]) > 0:
                 scored.gate_12_funding_cluster = False
-                    
+                
+            # Add this launch to history
+            if funder_wallet not in history:
+                history[funder_wallet] = []
+            history[funder_wallet].append(current_time)
+            
+            # Write back
+            try:
+                with open(history_file, "w") as f:
+                    json.dump(history, f)
+            except Exception:
+                pass
+                
             if not scored.gate_12_funding_cluster:
-                return self._fail_record(scored, "Gate 12 (Funding Source Sybil Cluster Detected)", "Tier 4a", gates_passed)
+                return self._fail_record(scored, f"Gate 12 (Funding Source Sybil Cluster Detected: {funder_wallet})", "Tier 4a", gates_passed)
         gates_passed += 1
 
         # If we reached here, ALL 14 GATES PASSED!

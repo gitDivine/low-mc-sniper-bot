@@ -82,6 +82,8 @@ class TokenSnapshotRecord(BaseModel):
     t0_median_buy_size_usd: float = 0.0
     t0_churn_volume_usd: float = 0.0
     t0_top_holders_first_tx_slots: list[int] = Field(default_factory=list)
+    t0_creator_funding_slot: int = 0
+    t0_funder_wallet: str = ""
 
     # T-Final Outcome (24h and 7d later)
     tfinal_24h_price_usd: float = 0.0
@@ -341,10 +343,22 @@ class HistoricalHarvester:
         has_transfer_fee = False
         has_freeze_authority = False
         has_permanent_delegate = False
-        creator_funding_slot = pool_slot
+        
+        creator_funding_slot = 0
+        funder_wallet = ""
+        t0_slot_data_collected = False
 
-        # --- On-Chain RPC Analytics for Solana (Gates 1, 4, 5) ---
+        # --- On-Chain RPC Analytics for Solana (Gates 1, 4, 5, 12) ---
         if self.ds_chain == "solana" and token_address:
+            # Fetch Gate 12 Funding Data
+            try:
+                f_slot, f_wallet = await api_client.fetch_creator_funding_info(token_address)
+                if f_wallet:
+                    creator_funding_slot = f_slot or 0
+                    funder_wallet = f_wallet
+                    t0_slot_data_collected = True
+            except Exception as e:
+                logger.error(f"Error fetching Gate 12 funding info for {token_address}: {e}")
             # Token Account Info parsing for Token-2022
             token_info = await api_client.fetch_token_account_info(token_address)
             if token_info:
@@ -438,6 +452,8 @@ class HistoricalHarvester:
             t0_unique_buyers=t0_unique_buyers,
             t0_volume_usd_15m=t0_vol_15m,
             t0_lp_locked_days=t0_lp_locked_days,
+            t0_forensics_collected=True,
+            t0_slot_data_collected=t0_slot_data_collected,
             tfinal_24h_price_usd=tfinal_24h_price_usd,
             tfinal_7d_price_usd=0.0,
             tfinal_24h_vol_usd=tfinal_24h_vol_usd,
@@ -448,7 +464,9 @@ class HistoricalHarvester:
             t0_is_token_2022=is_token_2022,
             t0_has_malicious_extensions=(has_transfer_fee or has_freeze_authority or has_permanent_delegate),
             t0_median_buy_size_usd=median_buy_usd_15m,
-            t0_churn_volume_usd=churn_volume_usd_15m
+            t0_churn_volume_usd=churn_volume_usd_15m,
+            t0_creator_funding_slot=creator_funding_slot,
+            t0_funder_wallet=funder_wallet
         )
 
     def _compute_outcome_label(self, price_t0: float, price_tfinal: float, reserve_usd: float, vol_24h_usd: float, age_hours: float) -> tuple[str, str]:
