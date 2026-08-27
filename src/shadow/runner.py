@@ -620,6 +620,16 @@ class ShadowRunner:
             snapshot["t0_holder_count_exact"] = holder_count if not snapshot["t0_holder_count_capped"] else None
             snapshot["t0_holder_count_floor"] = 100 if snapshot["t0_holder_count_capped"] else None
 
+            # 5. Live T0 Funding Forensics (Gate 12)
+            funder_slot, funder_wallet = await api_client.fetch_creator_funding_info(token_address)
+            if funder_wallet:
+                snapshot["t0_funder_wallet"] = funder_wallet
+                snapshot["t0_creator_funding_slot"] = funder_slot
+                snapshot["t0_slot_data_collected"] = True
+                logger.info(f"Gate 12 Live RPC: {symbol} funded by {funder_wallet} at slot {funder_slot}")
+            else:
+                logger.warning(f"Gate 12 Live RPC: Failed to resolve funder for {symbol} at T0 (likely hit pagination limit).")
+
         return snapshot
 
     # --- Outcome Resolution ---
