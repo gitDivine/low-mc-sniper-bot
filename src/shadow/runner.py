@@ -13,6 +13,7 @@ import pandas as pd
 
 from config.settings import settings
 from src.data_puller.api_client import api_client
+from src.data_puller.harvester import TokenSnapshotRecord
 
 from src.shadow.telegram_bot import TelegramNotifier
 
@@ -429,43 +430,57 @@ class ShadowRunner:
         short_addr = f" ({token_address[:5]}...)" if token_address and len(token_address) >= 5 else ""
         display_symbol = f"{symbol}{short_addr}"
 
-        snapshot = {
-            "pool_address": pool_address,
-            "token_address": token_address,
-            "symbol": display_symbol,
+        record = TokenSnapshotRecord(
+            chain=self.network,
+            token_address=token_address,
+            symbol=display_symbol,
+            name=symbol,  # Fallback to symbol as we don't fetch full name here
+            pool_address=pool_address,
+            created_at_utc=datetime.now(timezone.utc).isoformat(),
+            age_hours=age_hours,
+            t0_price_usd=price_usd,
+            t0_liquidity_usd=liquidity_usd,
+            t0_mcap_usd=mcap_usd,
+            t0_volume_usd_15m=vol_15m,
+            t0_top10_holder_pct=15.0,
+            t0_dev_wallet_pct=1.0,
+            t0_lp_locked_days=0,
+            t0_is_token_2022=False,
+            t0_has_malicious_extensions=False,
+            t0_has_rtl_scam=has_rtl_scam,
+            t0_buy_sell_ratio=0.0,
+            t0_holder_count=0,
+            t0_single_wallet_vol_pct=forensics.get("t0_single_wallet_vol_pct", 0.0) if forensics else 0.0,
+            t0_unique_buyers=forensics.get("t0_unique_buyers", 0) if forensics else 0,
+            t0_median_buy_size_usd=forensics.get("t0_median_buy_size_usd", 0.0) if forensics else 0.0,
+            t0_churn_volume_usd=forensics.get("t0_churn_volume_usd", 0.0) if forensics else 0.0,
+            t0_top_holders_first_tx_slots=[],
+            t0_creator_funding_slot=0,
+            t0_funder_wallet="",
+            t0_slot_data_collected=False,
+            t0_forensics_collected=forensics.get("t0_forensics_collected", False) if forensics else False,
+        )
+
+        snapshot = record.model_dump() if hasattr(record, "model_dump") else record.dict()
+        
+        # Inject runner-specific fields that scorer ignores but shadow runner reports on
+        snapshot.update({
             "raw_symbol": symbol,
             "network": self.network,
             "t0_timestamp": int(time.time()),
-            "t0_date": datetime.now(timezone.utc).isoformat(),
-            "age_hours": age_hours,
-            "t0_price_usd": price_usd,
-            "t0_liquidity_usd": liquidity_usd,
-            "t0_mcap_usd": mcap_usd,
-            "t0_volume_usd_15m": vol_15m,
-            "t0_top10_holder_pct": 15.0,
-            "t0_dev_wallet_pct": 1.0,
-            "t0_lp_locked_days": 0,
-            "t0_is_token_2022": False,
-            "t0_has_malicious_extensions": False,
-            "t0_has_rtl_scam": has_rtl_scam,
-            "t0_buy_sell_ratio": 0.0,
+            "t0_date": snapshot["created_at_utc"],
             "t0_holder_count_exact": None,
             "t0_holder_count_floor": None,
             "t0_holder_count_capped": False,
             "t0_avg_tx_size": 0.0,
-            "t0_single_wallet_vol_pct": forensics.get("t0_single_wallet_vol_pct", 0.0) if forensics else 0.0,
-            "t0_unique_buyers": forensics.get("t0_unique_buyers", 0) if forensics else 0,
-            "t0_median_buy_size_usd": forensics.get("t0_median_buy_size_usd", 0.0) if forensics else 0.0,
-            "pool_slot": 0,                      # Left unpopulated for Gate 12
-            "creator_funding_slot": 0,           # Left unpopulated for Gate 12
-            "pool_time": 0,                   
-            "t0_slot_data_collected": False,     # Explicit flag to avoid 0-sentinel ambiguity
-            "t0_forensics_collected": forensics.get("t0_forensics_collected", False) if forensics else False,
+            "pool_slot": 0,
+            "creator_funding_slot": 0,
+            "pool_time": 0,
             "t0_ratio_window": "",
             "liq_mcap_ratio": liq_mcap_ratio,
             "status": "PENDING",
             "drop_reason": None,
-        }
+        })
 
         if self.network == "solana" and token_address:
             # 1. Token-2022 & Extensions Check (Gate 11a/11b)
