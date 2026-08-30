@@ -649,7 +649,7 @@ class AsyncAPIClient:
             return None
 
         # 1. Get oldest sig for token mint (creator's tx)
-        creator_sig = await _fetch_oldest_sig(token_mint, max_pages=2)
+        creator_sig = await _fetch_oldest_sig(token_mint, max_pages=20)
         if not creator_sig:
             return None, None
 
@@ -673,7 +673,7 @@ class AsyncAPIClient:
             return None, None
 
         # 3. Get oldest sig for feePayer (funder's tx)
-        funder_sig = await _fetch_oldest_sig(fee_payer, max_pages=2)
+        funder_sig = await _fetch_oldest_sig(fee_payer, max_pages=5)
         if not funder_sig:
             return None, None
 
