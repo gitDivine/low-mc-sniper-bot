@@ -665,19 +665,9 @@ class ShadowRunner:
             snapshot["t0_holder_count_exact"] = holder_count if not snapshot["t0_holder_count_capped"] else None
             snapshot["t0_holder_count_floor"] = 100 if snapshot["t0_holder_count_capped"] else None
 
-            # 5. Live T0 RugCheck (Gate 3) & Creator Funder (Gate 12 bypass fix)
+            # 5. Live T0 RugCheck (Gate 3)
             rugcheck_data = await api_client.fetch_rugcheck_report(token_address)
             if rugcheck_data:
-                # Gate 12 bypass fix: direct creator extraction
-                creator = rugcheck_data.get("creator")
-                if creator:
-                    snapshot["t0_funder_wallet"] = creator
-                    snapshot["t0_creator_funding_slot"] = 0 # Deprecated in favor of wallet mapping
-                    snapshot["t0_slot_data_collected"] = True
-                    logger.info(f"Gate 12 RugCheck: {symbol} created by {creator}")
-                else:
-                    logger.warning(f"Gate 12 RugCheck: Failed to resolve creator field for {symbol}.")
-                
                 # Gate 3: Honeypot & Risk Parsing
                 risks = rugcheck_data.get("risks", [])
                 risk_names = []
@@ -698,6 +688,17 @@ class ShadowRunner:
                 snapshot["outcome_reason"] = "Failed to fetch RugCheck API report"
                 snapshot["drop_reason"] = "data_incomplete_rugcheck"
                 return snapshot
+                
+            # 6. Live T0 Funding Forensics (Gate 12)
+            # Restored to original intent: tracing the funder of the deployer, not just the deployer.
+            funder_slot, funder_wallet = await api_client.fetch_creator_funding_info(token_address)
+            if funder_wallet:
+                snapshot["t0_funder_wallet"] = funder_wallet
+                snapshot["t0_creator_funding_slot"] = funder_slot
+                snapshot["t0_slot_data_collected"] = True
+                logger.info(f"Gate 12 Live RPC: {symbol} funded by {funder_wallet} at slot {funder_slot}")
+            else:
+                logger.warning(f"Gate 12 Live RPC: Failed to resolve funder for {symbol} at T0 (likely hit pagination limit).")
 
         return snapshot
 
