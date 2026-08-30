@@ -594,6 +594,21 @@ class AsyncAPIClient:
                 
         return all_trades
 
+    async def fetch_rugcheck_report(self, token_mint: str) -> Optional[dict]:
+        """
+        Fetches the RugCheck report for a token mint.
+        Handles timeouts and retries cleanly.
+        """
+        url = f"https://api.rugcheck.xyz/v1/tokens/{token_mint}/report"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        
+        try:
+            res = await self._make_request("GET", url, custom_headers=headers)
+            return res
+        except Exception as e:
+            logger.warning(f"Error fetching RugCheck report for {token_mint}: {e}")
+            return None
+
     async def fetch_creator_funding_info(self, token_mint: str) -> tuple[Optional[int], Optional[str]]:
         """
         Fetches the funding slot and funder wallet for a token's creator.

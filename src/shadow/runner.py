@@ -381,26 +381,44 @@ class ShadowRunner:
                 else:
                     logger.warning(f"No Birdeye trades found for {data.get('symbol')} or fetch failed. Forensics marked False.")
 
-                snapshot = await self._capture_t0_snapshot(
-                    pool_address=pool_address,
-                    token_address=data.get("token_address"),
-                    symbol=data.get("symbol"),
-                    price_usd=price_usd,
-                    liquidity_usd=liquidity_usd,
-                    mcap_usd=mcap_usd,
-                    vol_15m=vol_15m,
-                    age_hours=age_seconds / 3600.0,
-                    has_rtl_scam=data.get("has_rtl_scam", False),
-                    forensics=forensics,
-                )
-
-                if snapshot.get("status") == "DROPPED":
-                    self.resolved_tokens.append(snapshot)
+                try:
+                    snapshot = await self._capture_t0_snapshot(
+                        pool_address=pool_address,
+                        token_address=data.get("token_address"),
+                        symbol=data.get("symbol"),
+                        price_usd=price_usd,
+                        liquidity_usd=liquidity_usd,
+                        mcap_usd=mcap_usd,
+                        vol_15m=vol_15m,
+                        age_hours=age_seconds / 3600.0,
+                        has_rtl_scam=data.get("has_rtl_scam", False),
+                        forensics=forensics,
+                    )
+    
+                    if snapshot.get("status") == "DROPPED":
+                        self.resolved_tokens.append(snapshot)
+                        self._save_resolved_tokens()
+                    else:
+                        self.pending_tokens[pool_address] = snapshot
+                        self._save_pending_tokens()
+                        logger.info(f"T0 snapshot captured and queued for {data.get('symbol')} (Age: {age_seconds/60:.1f}m)")
+                except Exception as e:
+                    logger.error(f"Failed to capture T0 snapshot for {data.get('symbol')} ({pool_address}): {type(e).__name__} - {e}")
+                    # Drop the token if we can't safely instantiate its schema
+                    drop_snapshot = {
+                        "pool_address": pool_address,
+                        "token_address": data.get("token_address"),
+                        "symbol": data.get("symbol"),
+                        "network": self.network,
+                        "status": "DROPPED",
+                        "outcome_label": "Schema Error",
+                        "outcome_reason": f"Validation Error: {str(e)[:100]}",
+                        "drop_reason": "schema_validation_error",
+                        "t0_timestamp": int(time.time()),
+                        "tfinal_timestamp": int(time.time()),
+                    }
+                    self.resolved_tokens.append(drop_snapshot)
                     self._save_resolved_tokens()
-                else:
-                    self.pending_tokens[pool_address] = snapshot
-                    self._save_pending_tokens()
-                    logger.info(f"T0 snapshot captured and queued for {data.get('symbol')} (Age: {age_seconds/60:.1f}m)")
 
                 del self.waiting_t0_tokens[pool_address]
                 self._save_waiting_t0_tokens()
@@ -457,6 +475,7 @@ class ShadowRunner:
             t0_top_holders_first_tx_slots=[],
             t0_creator_funding_slot=0,
             t0_funder_wallet="",
+            t0_rugcheck_risks="",
             t0_slot_data_collected=False,
             t0_forensics_collected=forensics.get("t0_forensics_collected", False) if forensics else False,
         )
@@ -483,32 +502,43 @@ class ShadowRunner:
         })
 
         if self.network == "solana" and token_address:
-            # 1. Token-2022 & Extensions Check (Gate 11a/11b)
+            # 1. Native Mint/Freeze Renouncement (Gate 2) & Token-2022 Extensions (Gate 11)
             token_info = await api_client.fetch_token_account_info(token_address)
             if token_info:
                 owner = token_info.get("owner", "")
                 if owner == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb":
                     snapshot["t0_is_token_2022"] = True
-                    # Check base64 extensions
-                    data_b64 = token_info.get("data", [""])[0]
-                    if data_b64:
-                        import base64
-                        try:
-                            raw_data = base64.b64decode(data_b64)
-                            offset = 82
-                            if len(raw_data) > offset:
-                                offset += 1
-                                while offset + 4 <= len(raw_data):
-                                    ext_type = int.from_bytes(raw_data[offset:offset+2], "little")
-                                    ext_len = int.from_bytes(raw_data[offset+2:offset+4], "little")
-                                    if ext_type in (1, 10): # TransferFeeConfig or PermanentDelegate
-                                        snapshot["t0_has_malicious_extensions"] = True
-                                    elif ext_type == 12: # DefaultAccountState
-                                        if offset + 4 + 1 <= len(raw_data) and raw_data[offset+4] == 2:
+                
+                data_b64 = token_info.get("data", [""])[0]
+                if data_b64:
+                    import base64
+                    import struct
+                    try:
+                        raw_data = base64.b64decode(data_b64)
+                        if len(raw_data) >= 82:
+                            # Parse standard SPL Mint layout
+                            mint_auth_opt = struct.unpack('<I', raw_data[0:4])[0]
+                            freeze_auth_opt = struct.unpack('<I', raw_data[46:50])[0]
+                            
+                            # Gate 2 strictly mandates BOTH are renounced (0)
+                            snapshot["t0_mint_renounced"] = (mint_auth_opt == 0 and freeze_auth_opt == 0)
+                            
+                            # Token-2022 Extensions parsing
+                            if snapshot["t0_is_token_2022"]:
+                                offset = 82
+                                if len(raw_data) > offset:
+                                    offset += 1
+                                    while offset + 4 <= len(raw_data):
+                                        ext_type = int.from_bytes(raw_data[offset:offset+2], "little")
+                                        ext_len = int.from_bytes(raw_data[offset+2:offset+4], "little")
+                                        if ext_type in (1, 10): # TransferFeeConfig or PermanentDelegate
                                             snapshot["t0_has_malicious_extensions"] = True
-                                    offset += 4 + ext_len
-                        except Exception:
-                            pass
+                                        elif ext_type == 12: # DefaultAccountState
+                                            if offset + 4 + 1 <= len(raw_data) and raw_data[offset+4] == 2:
+                                                snapshot["t0_has_malicious_extensions"] = True
+                                        offset += 4 + ext_len
+                    except Exception:
+                        pass
 
             # 2. T0 Real-Time Holder & Dev Wallet Check (Gates 4 & 5)
             supply = await api_client.fetch_solana_token_supply(token_address)
@@ -635,15 +665,39 @@ class ShadowRunner:
             snapshot["t0_holder_count_exact"] = holder_count if not snapshot["t0_holder_count_capped"] else None
             snapshot["t0_holder_count_floor"] = 100 if snapshot["t0_holder_count_capped"] else None
 
-            # 5. Live T0 Funding Forensics (Gate 12)
-            funder_slot, funder_wallet = await api_client.fetch_creator_funding_info(token_address)
-            if funder_wallet:
-                snapshot["t0_funder_wallet"] = funder_wallet
-                snapshot["t0_creator_funding_slot"] = funder_slot
-                snapshot["t0_slot_data_collected"] = True
-                logger.info(f"Gate 12 Live RPC: {symbol} funded by {funder_wallet} at slot {funder_slot}")
+            # 5. Live T0 RugCheck (Gate 3) & Creator Funder (Gate 12 bypass fix)
+            rugcheck_data = await api_client.fetch_rugcheck_report(token_address)
+            if rugcheck_data:
+                # Gate 12 bypass fix: direct creator extraction
+                creator = rugcheck_data.get("creator")
+                if creator:
+                    snapshot["t0_funder_wallet"] = creator
+                    snapshot["t0_creator_funding_slot"] = 0 # Deprecated in favor of wallet mapping
+                    snapshot["t0_slot_data_collected"] = True
+                    logger.info(f"Gate 12 RugCheck: {symbol} created by {creator}")
+                else:
+                    logger.warning(f"Gate 12 RugCheck: Failed to resolve creator field for {symbol}.")
+                
+                # Gate 3: Honeypot & Risk Parsing
+                risks = rugcheck_data.get("risks", [])
+                risk_names = []
+                has_danger = False
+                for r in risks:
+                    risk_names.append(f"{r.get('name')}:{r.get('level')}")
+                    if r.get("level") == "danger":
+                        has_danger = True
+                
+                snapshot["t0_rugcheck_risks"] = ", ".join(risk_names)
+                if has_danger:
+                    snapshot["t0_honeypot_pass"] = False
+                    logger.warning(f"Gate 3 RugCheck: {symbol} failed honeypot with danger risks: {snapshot['t0_rugcheck_risks']}")
             else:
-                logger.warning(f"Gate 12 Live RPC: Failed to resolve funder for {symbol} at T0 (likely hit pagination limit).")
+                logger.error(f"RugCheck API failed or timed out for {symbol}. Dropping token.")
+                snapshot["status"] = "DROPPED"
+                snapshot["outcome_label"] = "Data Incomplete"
+                snapshot["outcome_reason"] = "Failed to fetch RugCheck API report"
+                snapshot["drop_reason"] = "data_incomplete_rugcheck"
+                return snapshot
 
         return snapshot
 

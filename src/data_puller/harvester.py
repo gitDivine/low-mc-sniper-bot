@@ -72,6 +72,7 @@ class TokenSnapshotRecord(BaseModel):
     t0_is_lp_burned: bool = False
     t0_mint_renounced: bool = True
     t0_honeypot_pass: bool = True
+    t0_rugcheck_risks: str = ""
     t0_cluster_pass: bool = True
     t0_forensics_collected: bool = False
     t0_slot_data_collected: bool = False
