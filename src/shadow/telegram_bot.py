@@ -178,7 +178,11 @@ class TelegramNotifier:
         while True:
             try:
                 url = f"{self.base_url}/getUpdates"
-                params = {"offset": self.offset, "timeout": 20}
+                params = {
+                    "offset": self.offset, 
+                    "timeout": 20,
+                    "allowed_updates": ["message", "callback_query"]
+                }
                 async with httpx.AsyncClient(timeout=25.0) as client:
                     res = await client.get(url, params=params)
                     if res.status_code == 200:

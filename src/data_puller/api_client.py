@@ -603,7 +603,7 @@ class AsyncAPIClient:
         headers = {"User-Agent": "Mozilla/5.0"}
         
         try:
-            res = await self._make_request("GET", url, custom_headers=headers)
+            res = await self._get(url, custom_headers=headers)
             return res
         except Exception as e:
             logger.warning(f"Error fetching RugCheck report for {token_mint}: {e}")
